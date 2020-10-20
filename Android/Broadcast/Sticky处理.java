@@ -2,6 +2,7 @@
 
 // 观察register过程中sticky的特殊处理
 
+// 文件分布：ActivityManagerService.java
 
 // R上的签名已更改WithFeature
 public Intent registerReceiverWithFeature(IApplicationThread caller, String callerPackage,
@@ -194,7 +195,7 @@ public Intent registerReceiverWithFeature(IApplicationThread caller, String call
                         null, null, -1, -1, false, null, null, OP_NONE, null, receivers,
                         null, 0, null, null, false, true, true, -1, false,
                         false /* only PRE_BOOT_COMPLETED should be exempt, no stickies */);
-                queue.enqueueParallelBroadcastLocked(r);
+                queue.enqueueParallelBroadcastLocked(r); // sticky关键在于register过程直接调度
                 queue.scheduleBroadcastsLocked();
             }
         }
