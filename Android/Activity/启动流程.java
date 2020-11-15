@@ -75,7 +75,7 @@
                     intent, requestCode, options);
 // TRACE END
             if (ar != null) {
-                mMainThread.sendActivityResult(
+                mMainThread.sendActivityResult(                                              // TODO sendActivityResult
                     mToken, mEmbeddedID, requestCode, ar.getResultCode(),
                     ar.getResultData());
             }
@@ -325,7 +325,7 @@
             final LaunchingState launchingState;
             synchronized (mService.mGlobalLock) {
                 final ActivityRecord caller = ActivityRecord.forTokenLocked(mRequest.resultTo);      // TODO caller
-                launchingState = mSupervisor.getActivityMetricsLogger().notifyActivityLaunching(
+                launchingState = mSupervisor.getActivityMetricsLogger().notifyActivityLaunching(     // TODO mSupervisor
                         mRequest.intent, caller);
             }
 
