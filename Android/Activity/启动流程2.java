@@ -10,6 +10,7 @@
         int result = START_CANCELED;
         final ActivityStack startedActivityStack;
         try {
+            // 一个优化的方法，对应continueWindowLayout
             mService.deferWindowLayout();
             Trace.traceBegin(Trace.TRACE_TAG_WINDOW_MANAGER, "startActivityInner");
 // TRACK BEGIN
@@ -18,6 +19,9 @@
 // TRACK END
         } finally {
             Trace.traceEnd(Trace.TRACE_TAG_WINDOW_MANAGER);
+            // 该方法的注释：If the start result is success, ensure that the configuration of the started activity matches
+            // the current display. Otherwise clean up unassociated containers to avoid leakage.
+            // @return the stack where the successful started activity resides.
             startedActivityStack = handleStartResult(r, result);
             mService.continueWindowLayout();
         }

@@ -457,9 +457,12 @@
                     + "} from uid " + callingUid);
         }
 
-        ActivityRecord sourceRecord = null;
-        ActivityRecord resultRecord = null;                                                 // TODO
+        // 描述resultTo对应的ActivityRecord
+        ActivityRecord sourceRecord = null; 
+        // 情况比较复杂，result不一定是source
+        ActivityRecord resultRecord = null; 
         if (resultTo != null) {
+            // 通过token在mRootWindowContainer查找AMS端的Record
             sourceRecord = mRootWindowContainer.isInAnyStack(resultTo);
             if (DEBUG_RESULTS) {
                 Slog.v(TAG_RESULTS, "Will send result to " + resultTo + " " + sourceRecord);
@@ -472,6 +475,7 @@
         }
 // SKIP START
         final int launchFlags = intent.getFlags();
+        // 传递result到其它Activity
         if ((launchFlags & Intent.FLAG_ACTIVITY_FORWARD_RESULT) != 0 && sourceRecord != null) {
             // Transfer the result target from the source activity to the new one being started,
             // including any failures.
@@ -479,6 +483,7 @@
                 SafeActivityOptions.abort(options);
                 return ActivityManager.START_FORWARD_AND_REQUEST_CONFLICT;
             }
+            // 因此resultRecord会指向其它Record
             resultRecord = sourceRecord.resultTo;
             if (resultRecord != null && !resultRecord.isInStackLocked()) {
                 resultRecord = null;
@@ -487,6 +492,8 @@
             requestCode = sourceRecord.requestCode;
             sourceRecord.resultTo = null;
             if (resultRecord != null) {
+                // 删除已经接收到的result
+                // 后面会sendResult
                 resultRecord.removeResultsLocked(sourceRecord, resultWho, requestCode);
             }
             if (sourceRecord.launchedFromUid == callingUid) {
@@ -555,10 +562,11 @@
                 err = ActivityManager.START_NOT_VOICE_COMPATIBLE;
             }
         }
-
+// SKIP END
         final ActivityStack resultStack = resultRecord == null
                 ? null : resultRecord.getRootTask();
 
+        // 传递errno
         if (err != START_SUCCESS) {
             if (resultRecord != null) {
                 resultRecord.sendResult(INVALID_UID, resultWho, requestCode, RESULT_CANCELED,
@@ -568,6 +576,7 @@
             return err;
         }
 
+// SKIP START
         boolean abort = !mSupervisor.checkStartAnyActivityPermission(intent, aInfo, resultWho,
                 requestCode, callingPid, callingUid, callingPackage, callingFeatureId,
                 request.ignoreTargetSecurity, inTask != null, callerApp, resultRecord, resultStack);
@@ -630,6 +639,8 @@
             intentGrants = null;
         }
 
+// SKIP END
+        // abort终止流程
         if (abort) {
             if (resultRecord != null) {
                 resultRecord.sendResult(INVALID_UID, resultWho, requestCode, RESULT_CANCELED,
@@ -722,6 +733,7 @@
             aInfo = mSupervisor.resolveActivity(intent, rInfo, startFlags, null /*profilerInfo*/);
         }
 
+        // 确定可以构造record
         final ActivityRecord r = new ActivityRecord(mService, callerApp, callingPid, callingUid,
                 callingPackage, callingFeatureId, intent, resolvedType, aInfo,
                 mService.getGlobalConfiguration(), resultRecord, resultWho, requestCode,
@@ -755,7 +767,7 @@
         mService.onStartActivitySetDidAppSwitch();
         mController.doPendingActivityLaunches(false);
 
-// SKIP END
+
 
 
 
