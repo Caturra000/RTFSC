@@ -5,7 +5,7 @@
 robj *createObject(int type, void *ptr) {
     robj *o = zmalloc(sizeof(*o));
     o->type = type;
-    o->encoding = REDIS_ENCODING_RAW;
+    o->encoding = REDIS_ENCODING_RAW; // 一个刚创建的encoding
     o->ptr = ptr;
     o->refcount = 1;
 
@@ -17,11 +17,11 @@ robj *createObject(int type, void *ptr) {
      * and accessing server.lruclock in theory is an error
      * (no locks). But in practice this is safe, and even if we read
      * garbage Redis will not fail. */
-    o->lru = server.lruclock;
+    o->lru = server.lruclock;                                                       // TODO lruclock
     /* The following is only needed if VM is active, but since the conditional
      * is probably more costly than initializing the field it's better to
      * have every field properly initialized anyway. */
-    o->storage = REDIS_VM_MEMORY;
+    o->storage = REDIS_VM_MEMORY;                                                   // TODO VM
     return o;
 }
 
@@ -32,7 +32,7 @@ robj *createStringObject(char *ptr, size_t len) {
 robj *createStringObjectFromLongLong(long long value) {
     robj *o;
     if (value >= 0 && value < REDIS_SHARED_INTEGERS &&
-        pthread_equal(pthread_self(),server.mainthread)) {
+        pthread_equal(pthread_self(),server.mainthread)) { // 必须是主线程内，避免上锁
         incrRefCount(shared.integers[value]);
         o = shared.integers[value];
     } else {
@@ -55,7 +55,7 @@ robj *dupStringObject(robj *o) {
 robj *createListObject(void) {
     list *l = listCreate();
     robj *o = createObject(REDIS_LIST,l);
-    listSetFreeMethod(l,decrRefCount);
+    listSetFreeMethod(l,decrRefCount);                                      // TODO
     o->encoding = REDIS_ENCODING_LINKEDLIST;
     return o;
 }
@@ -101,6 +101,9 @@ robj *createZsetObject(void) {
     o->encoding = REDIS_ENCODING_SKIPLIST;
     return o;
 }
+
+// free都是switch-case来处理多态
+
 
 void freeStringObject(robj *o) {
     if (o->encoding == REDIS_ENCODING_RAW) {
@@ -163,7 +166,7 @@ void incrRefCount(robj *o) {
 void decrRefCount(void *obj) {
     robj *o = obj;
 
-    /* Object is a swapped out value, or in the process of being loaded. */
+    /* Object is a swapped out value, or in the process of being loaded. */            // TODO
     if (server.vm_enabled &&
         (o->storage == REDIS_VM_SWAPPED || o->storage == REDIS_VM_LOADING))
     {

@@ -753,6 +753,7 @@
         // one, check whether app switches are allowed.
         if (voiceSession == null && stack != null && (stack.getResumedActivity() == null
                 || stack.getResumedActivity().info.applicationInfo.uid != realCallingUid)) {
+            // 不允许切换则添加到PendingActivityLaunch并返回
             if (!mService.checkAppSwitchAllowedLocked(callingPid, callingUid,
                     realCallingPid, realCallingUid, "Activity start")) {
                 if (!(restrictedBgActivity && handleBackgroundActivityAbort(r))) {

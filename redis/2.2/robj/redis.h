@@ -1,11 +1,12 @@
 // 节选
 
 // Draft
-// robj的设计可能提供以下特性（说可能是因为我没看完。。）
+// robj的设计可能提供以下特性
 // 1. 简单的OOP
 // 2. 类型检查和多态
 // 3. flyWeight缓存
 // 4. refcount方便生命周期管理
+// 5. 分级管理实现
 
 /* The actual Redis Object */
 #define REDIS_LRU_CLOCK_MAX ((1<<21)-1) /* Max value of obj->lru */
