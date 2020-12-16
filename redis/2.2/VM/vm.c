@@ -1,3 +1,9 @@
+// INFO:
+// https://redis.io/topics/virtual-memory
+// https://redis.io/topics/internals-vm
+
+
+
 #include "redis.h"
 
 #include <fcntl.h>
