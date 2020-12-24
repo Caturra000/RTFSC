@@ -26,6 +26,8 @@ public class NotificationManagerService extends SystemService {
             enqueueToast(pkg, token, null, callback, duration, displayId, null);
         }
 
+        // 1. R上新增block判断
+        // 2. 入队调度
         private void enqueueToast(String pkg, IBinder token, @Nullable CharSequence text,
                 @Nullable ITransientNotification callback, int duration, int displayId,
                 @Nullable ITransientNotificationCallback textCallback) {
@@ -96,6 +98,7 @@ public class NotificationManagerService extends SystemService {
                 }
             }
 
+            // 调度
             synchronized (mToastQueue) {
                 int callingPid = Binder.getCallingPid();
                 long callingId = Binder.clearCallingIdentity();
@@ -125,8 +128,8 @@ public class NotificationManagerService extends SystemService {
                         }
 
                         Binder windowToken = new Binder();
-                        mWindowManagerInternal.addWindowToken(windowToken, TYPE_TOAST, displayId);
-                        // 
+                        mWindowManagerInternal.addWindowToken(windowToken, TYPE_TOAST, displayId);          // TODO
+                        // 构造一个TextRecord或者CustomRecord
                         record = getToastRecord(callingUid, callingPid, pkg, token, text, callback,
                                 duration, windowToken, displayId, textCallback);
                         mToastQueue.add(record);
@@ -138,7 +141,7 @@ public class NotificationManagerService extends SystemService {
                     // If the callback fails, this will remove it from the list, so don't
                     // assume that it's valid after this.
                     if (index == 0) {
-                        showNextToastLocked();
+                        showNextToastLocked(); // 这个方法总是从0开始调度，因此需要判断index == 0
                     }
                 } finally {
                     Binder.restoreCallingIdentity(callingId);
@@ -165,6 +168,77 @@ public class NotificationManagerService extends SystemService {
         }
     }
 
+    void showNextToastLocked() {
+        ToastRecord record = mToastQueue.get(0);
+        while (record != null) {
+            if (record.show()) {
+                // 扔出超时MSG，到达duration后会触发
+                scheduleDurationReachedLocked(record);
+                return;
+            }
+            // 如果失败则移除，直到某一个record成功show 
+            // 或者 已经没有了，没有的话会在下一次插入时(必然index == 0)再次showNextToastLocked
+            int index = mToastQueue.indexOf(record);
+            if (index >= 0) {
+                mToastQueue.remove(index);
+            }
+            record = (mToastQueue.size() > 0) ? mToastQueue.get(0) : null;
+        }
+    }
+
+    private void scheduleDurationReachedLocked(ToastRecord r)
+    {
+        // 清空handler中的mMessages
+        mHandler.removeCallbacksAndMessages(r);
+        Message m = Message.obtain(mHandler, MESSAGE_DURATION_REACHED, r);
+        int delay = r.getDuration() == Toast.LENGTH_LONG ? LONG_DELAY : SHORT_DELAY;
+        // Accessibility users may need longer timeout duration. This api compares original delay
+        // with user's preference and return longer one. It returns original delay if there's no
+        // preference.
+        delay = mAccessibilityManager.getRecommendedTimeoutMillis(delay,
+                AccessibilityManager.FLAG_CONTENT_TEXT);
+        mHandler.sendMessageDelayed(m, delay);
+    }
+
+    private WorkerHandler mHandler;
+
+        protected class WorkerHandler extends Handler
+    {
+        public WorkerHandler(Looper looper) {
+            super(looper);
+        }
+
+        @Override
+        public void handleMessage(Message msg)
+        {
+            switch (msg.what)
+            {
+                case MESSAGE_DURATION_REACHED:
+                    handleDurationReached((ToastRecord) msg.obj);
+                    break;
+                case MESSAGE_FINISH_TOKEN_TIMEOUT:
+                    handleKillTokenTimeout((ToastRecord) msg.obj);
+                    break;
+                case MESSAGE_SEND_RANKING_UPDATE:
+                    handleSendRankingUpdate();
+                    break;
+                case MESSAGE_LISTENER_HINTS_CHANGED:
+                    handleListenerHintsChanged(msg.arg1);
+                    break;
+                case MESSAGE_LISTENER_NOTIFICATION_FILTER_CHANGED:
+                    handleListenerInterruptionFilterChanged(msg.arg1);
+                    break;
+                case MESSAGE_ON_PACKAGE_CHANGED:
+                    SomeArgs args = (SomeArgs) msg.obj;
+                    handleOnPackageChanged((boolean) args.arg1, args.argi1, (String[]) args.arg2,
+                            (int[]) args.arg3);
+                    args.recycle();
+                    break;
+            }
+        }
+
+        // ...
+    }
 
 
 }
