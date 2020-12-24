@@ -1,131 +1,19 @@
+// 文件分布：frameworks/base/services/core/java/com/android/server/notification/NotificationManagerService.java
 
-// 文件分布：frameworks/base/core/java/android/widget/Toast.java
-
-
-public class Toast {
+public class NotificationManagerService extends SystemService {
 
     // ...
 
-    private final Binder mToken;
-    private final Context mContext;
-    private final Handler mHandler;
-    @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.P)
-    final TN mTN;
-    @UnsupportedAppUsage
-    int mDuration;
-
-    /**
-     * This is also passed to {@link TN} object, where it's also accessed with itself as its own
-     * lock.
-     */
-    @GuardedBy("mCallbacks")
-    private final List<Callback> mCallbacks;
-
-    /**
-     * View to be displayed, in case this is a custom toast (e.g. not created with {@link
-     * #makeText(Context, int, int)} or its variants).
-     */
-    @Nullable
-    private View mNextView;
-
-    /**
-     * Text to be shown, in case this is NOT a custom toast (e.g. created with {@link
-     * #makeText(Context, int, int)} or its variants).
-     */
-    @Nullable
-    private CharSequence mText;
-
-
-    public Toast(@NonNull Context context, @Nullable Looper looper) {
-        mContext = context;
-        mToken = new Binder();
-        looper = getLooper(looper);
-        mHandler = new Handler(looper);
-        mCallbacks = new ArrayList<>();
-        mTN = new TN(context, context.getPackageName(), mToken, // TN获取包名
-                mCallbacks, looper);
-        mTN.mY = context.getResources().getDimensionPixelSize(
-                com.android.internal.R.dimen.toast_y_offset);
-        mTN.mGravity = context.getResources().getInteger(
-                com.android.internal.R.integer.config_toastDefaultGravity);
-    }
-
-    /**
-     * @param context  The context to use.  Usually your {@link android.app.Application}
-     *                 or {@link android.app.Activity} object.
-     */
-    public static Toast makeText(Context context, CharSequence text, @Duration int duration) {
-        return makeText(context, null, text, duration); // looper为null，既使用myLooper()
-    }
-
-    public static Toast makeText(@NonNull Context context, @Nullable Looper looper,
-            @NonNull CharSequence text, @Duration int duration) {
-        if (Compatibility.isChangeEnabled(CHANGE_TEXT_TOASTS_IN_THE_SYSTEM)) {
-            Toast result = new Toast(context, looper);
-            result.mText = text;
-            result.mDuration = duration;
-            return result;
-        } else {
-            Toast result = new Toast(context, looper);
-            View v = ToastPresenter.getTextToastView(context, text);   // TODO
-            result.mNextView = v;
-            result.mDuration = duration;
-
-            return result;
-        }
-    }
-
-
-
-    public void show() {
-        if (Compatibility.isChangeEnabled(CHANGE_TEXT_TOASTS_IN_THE_SYSTEM)) {
-            checkState(mNextView != null || mText != null, "You must either set a text or a view");
-        } else {
-            if (mNextView == null) {
-                throw new RuntimeException("setView must have been called");
-            }
-        }
-
-        // 这里涉及到两个重要的类，NMS和TN
-
-        // 获取NMS，用于管理所有需要显示的Toast
-        INotificationManager service = getService();
-        String pkg = mContext.getOpPackageName();
-        // TN表示TransientNotification
-        TN tn = mTN;                                                                          // TODO TN
-        tn.mNextView = mNextView;
-        final int displayId = mContext.getDisplayId();
-
-        try {
-            if (Compatibility.isChangeEnabled(CHANGE_TEXT_TOASTS_IN_THE_SYSTEM)) {
-                if (mNextView != null) {
-                    // It's a custom toast
-                    service.enqueueToast(pkg, mToken, tn, mDuration, displayId);
-                } else {
-                    // It's a text toast
-                    ITransientNotificationCallback callback =
-                            new CallbackBinder(mCallbacks, mHandler);
-                    service.enqueueTextToast(pkg, mToken, mText, mDuration, displayId, callback);
-                }
-            } else {
-// TRACK BEGIN
-                service.enqueueToast(pkg, mToken, tn, mDuration, displayId);
-// TRACK END
-            }
-        } catch (RemoteException e) {
-            // Empty
-        }
-    }
-
-}
-
-
-
-
-    // 文件分布：frameworks/base/services/core/java/com/android/server/notification/NotificationManagerService.java
-    // Update. 迁移至独立文件
-
+        @VisibleForTesting
     final IBinder mService = new INotificationManager.Stub() {
+        // Toasts
+        // ============================================================================
+
+        // 在Client端中，下述参数对应于
+        // token: mToken = new Binder();
+        // callback: mTN = new TN(context, context.getPackageName(), mToken, mCallbacks, looper);
+
+
         @Override
         public void enqueueTextToast(String pkg, IBinder token, CharSequence text, int duration,
                 int displayId, @Nullable ITransientNotificationCallback callback) {
@@ -141,7 +29,6 @@ public class Toast {
         private void enqueueToast(String pkg, IBinder token, @Nullable CharSequence text,
                 @Nullable ITransientNotification callback, int duration, int displayId,
                 @Nullable ITransientNotificationCallback textCallback) {
-// SKIP BEGIN
             if (DBG) {
                 Slog.i(TAG, "enqueueToast pkg=" + pkg + " token=" + token
                         + " duration=" + duration + " displayId=" + displayId);
@@ -178,8 +65,10 @@ public class Toast {
                         : " by user request."));
                 return;
             }
-
+            // 从下面的注释可以知道，isAppRenderedToast就是判断是否为一个自定义toast
+            // 会应用于boolean block的判断
             boolean isAppRenderedToast = (callback != null);
+            // 自定义 / 非系统 / 位于后台 则有可能block（需要target api的判断）
             if (isAppRenderedToast && !isSystemToast && !isPackageInForegroundForToast(pkg,
                     callingUid)) {
                 boolean block;
@@ -206,7 +95,7 @@ public class Toast {
                     return;
                 }
             }
-// SKIP END
+
             synchronized (mToastQueue) {
                 int callingPid = Binder.getCallingPid();
                 long callingId = Binder.clearCallingIdentity();
@@ -215,7 +104,7 @@ public class Toast {
                     int index = indexOfToastLocked(pkg, token);
                     // If it's already in the queue, we update it in place, we don't
                     // move it to the end of the queue.
-                    if (index >= 0) { // 已存在，则inplace更新duration
+                    if (index >= 0) {
                         record = mToastQueue.get(index);
                         record.update(duration);
                     } else {
@@ -227,7 +116,6 @@ public class Toast {
                             final ToastRecord r = mToastQueue.get(i);
                             if (r.pkg.equals(pkg)) {
                                 count++;
-                                // 每一个Package都有最大限制，超过则结束
                                 if (count >= MAX_PACKAGE_NOTIFICATIONS) {
                                     Slog.e(TAG, "Package has already posted " + count
                                             + " toasts. Not showing more. Package=" + pkg);
@@ -235,9 +123,10 @@ public class Toast {
                                 }
                             }
                         }
-                        // 构造 插入
+
                         Binder windowToken = new Binder();
                         mWindowManagerInternal.addWindowToken(windowToken, TYPE_TOAST, displayId);
+                        // 
                         record = getToastRecord(callingUid, callingPid, pkg, token, text, callback,
                                 duration, windowToken, displayId, textCallback);
                         mToastQueue.add(record);
@@ -249,9 +138,7 @@ public class Toast {
                     // If the callback fails, this will remove it from the list, so don't
                     // assume that it's valid after this.
                     if (index == 0) {
-// TRACK BEGIN
                         showNextToastLocked();
-// TRACK END
                     }
                 } finally {
                     Binder.restoreCallingIdentity(callingId);
@@ -259,23 +146,25 @@ public class Toast {
             }
         }
 
-        //...
+        // ...
 
     }
 
-    void showNextToastLocked() {
-        ToastRecord record = mToastQueue.get(0);
-        while (record != null) {
-            if (record.show()) { // 不满足显示条件则false
-                scheduleDurationReachedLocked(record);
-                return;
-            }
-            // 已经不满足条件了，移除
-            int index = mToastQueue.indexOf(record);
-            if (index >= 0) {
-                mToastQueue.remove(index);
-            }
-            record = (mToastQueue.size() > 0) ? mToastQueue.get(0) : null;
+
+    private ToastRecord getToastRecord(int uid, int pid, String packageName, IBinder token,
+            @Nullable CharSequence text, @Nullable ITransientNotification callback, int duration,
+            Binder windowToken, int displayId,
+            @Nullable ITransientNotificationCallback textCallback) {
+        if (callback == null) {
+            return new TextToastRecord(this, mStatusBar, uid, pid, packageName, token, text,
+                    duration, windowToken, displayId, textCallback);
+        } else {
+            // here
+            return new CustomToastRecord(this, uid, pid, packageName, token, callback, duration,
+                    windowToken, displayId);
         }
     }
 
+
+
+}
