@@ -7,6 +7,8 @@
 // ISO C++ 14882: 21 Strings library
 //
 
+// 删除iterator wstring/各种奇形怪状的char_t/uXXstring operator"s 还有C++17以上的部分
+
 #ifndef _BASIC_STRING_H
 #define _BASIC_STRING_H 1
 
@@ -3072,13 +3074,6 @@ _GLIBCXX_END_NAMESPACE_CXX11
     getline(basic_istream<char>& __in, basic_string<char>& __str,
 	    char __delim);
 
-#ifdef _GLIBCXX_USE_WCHAR_T
-  template<>
-    basic_istream<wchar_t>&
-    getline(basic_istream<wchar_t>& __in, basic_string<wchar_t>& __str,
-	    wchar_t __delim);
-#endif  
-
 _GLIBCXX_END_NAMESPACE_VERSION
 } // namespace
 
@@ -3091,112 +3086,7 @@ namespace std _GLIBCXX_VISIBILITY(default)
 _GLIBCXX_BEGIN_NAMESPACE_VERSION
 _GLIBCXX_BEGIN_NAMESPACE_CXX11
 
-#if _GLIBCXX_USE_C99_STDLIB
-  // 21.4 Numeric Conversions [string.conversions].
-  inline int
-  stoi(const string& __str, size_t* __idx = 0, int __base = 10)
-  { return __gnu_cxx::__stoa<long, int>(&std::strtol, "stoi", __str.c_str(),
-					__idx, __base); }
 
-  inline long
-  stol(const string& __str, size_t* __idx = 0, int __base = 10)
-  { return __gnu_cxx::__stoa(&std::strtol, "stol", __str.c_str(),
-			     __idx, __base); }
-
-  inline unsigned long
-  stoul(const string& __str, size_t* __idx = 0, int __base = 10)
-  { return __gnu_cxx::__stoa(&std::strtoul, "stoul", __str.c_str(),
-			     __idx, __base); }
-
-  inline long long
-  stoll(const string& __str, size_t* __idx = 0, int __base = 10)
-  { return __gnu_cxx::__stoa(&std::strtoll, "stoll", __str.c_str(),
-			     __idx, __base); }
-
-  inline unsigned long long
-  stoull(const string& __str, size_t* __idx = 0, int __base = 10)
-  { return __gnu_cxx::__stoa(&std::strtoull, "stoull", __str.c_str(),
-			     __idx, __base); }
-
-  // NB: strtof vs strtod.
-  inline float
-  stof(const string& __str, size_t* __idx = 0)
-  { return __gnu_cxx::__stoa(&std::strtof, "stof", __str.c_str(), __idx); }
-
-  inline double
-  stod(const string& __str, size_t* __idx = 0)
-  { return __gnu_cxx::__stoa(&std::strtod, "stod", __str.c_str(), __idx); }
-
-  inline long double
-  stold(const string& __str, size_t* __idx = 0)
-  { return __gnu_cxx::__stoa(&std::strtold, "stold", __str.c_str(), __idx); }
-#endif // _GLIBCXX_USE_C99_STDLIB
-
-#if _GLIBCXX_USE_C99_STDIO
-  // NB: (v)snprintf vs sprintf.
-
-  // DR 1261.
-  inline string
-  to_string(int __val)
-  { return __gnu_cxx::__to_xstring<string>(&std::vsnprintf, 4 * sizeof(int),
-					   "%d", __val); }
-
-  inline string
-  to_string(unsigned __val)
-  { return __gnu_cxx::__to_xstring<string>(&std::vsnprintf,
-					   4 * sizeof(unsigned),
-					   "%u", __val); }
-
-  inline string
-  to_string(long __val)
-  { return __gnu_cxx::__to_xstring<string>(&std::vsnprintf, 4 * sizeof(long),
-					   "%ld", __val); }
-
-  inline string
-  to_string(unsigned long __val)
-  { return __gnu_cxx::__to_xstring<string>(&std::vsnprintf,
-					   4 * sizeof(unsigned long),
-					   "%lu", __val); }
-
-  inline string
-  to_string(long long __val)
-  { return __gnu_cxx::__to_xstring<string>(&std::vsnprintf,
-					   4 * sizeof(long long),
-					   "%lld", __val); }
-
-  inline string
-  to_string(unsigned long long __val)
-  { return __gnu_cxx::__to_xstring<string>(&std::vsnprintf,
-					   4 * sizeof(unsigned long long),
-					   "%llu", __val); }
-
-  inline string
-  to_string(float __val)
-  {
-    const int __n = 
-      __gnu_cxx::__numeric_traits<float>::__max_exponent10 + 20;
-    return __gnu_cxx::__to_xstring<string>(&std::vsnprintf, __n,
-					   "%f", __val);
-  }
-
-  inline string
-  to_string(double __val)
-  {
-    const int __n = 
-      __gnu_cxx::__numeric_traits<double>::__max_exponent10 + 20;
-    return __gnu_cxx::__to_xstring<string>(&std::vsnprintf, __n,
-					   "%f", __val);
-  }
-
-  inline string
-  to_string(long double __val)
-  {
-    const int __n = 
-      __gnu_cxx::__numeric_traits<long double>::__max_exponent10 + 20;
-    return __gnu_cxx::__to_xstring<string>(&std::vsnprintf, __n,
-					   "%Lf", __val);
-  }
-#endif // _GLIBCXX_USE_C99_STDIO
 
 _GLIBCXX_END_NAMESPACE_CXX11
 _GLIBCXX_END_NAMESPACE_VERSION
@@ -3229,70 +3119,12 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
     struct __is_fast_hash<hash<string>> : std::false_type
     { };
 
-#ifdef _GLIBCXX_USE_WCHAR_T
-  /// std::hash specialization for wstring.
-  template<>
-    struct hash<wstring>
-    : public __hash_base<size_t, wstring>
-    {
-      size_t
-      operator()(const wstring& __s) const noexcept
-      { return std::_Hash_impl::hash(__s.data(),
-                                     __s.length() * sizeof(wchar_t)); }
-    };
 
-  template<>
-    struct __is_fast_hash<hash<wstring>> : std::false_type
-    { };
-#endif
 #endif /* _GLIBCXX_COMPATIBILITY_CXX0X */
 
-#ifdef _GLIBCXX_USE_CHAR8_T
-  /// std::hash specialization for u8string.
-  template<>
-    struct hash<u8string>
-    : public __hash_base<size_t, u8string>
-    {
-      size_t
-      operator()(const u8string& __s) const noexcept
-      { return std::_Hash_impl::hash(__s.data(),
-                                     __s.length() * sizeof(char8_t)); }
-    };
 
-  template<>
-    struct __is_fast_hash<hash<u8string>> : std::false_type
-    { };
-#endif
 
-  /// std::hash specialization for u16string.
-  template<>
-    struct hash<u16string>
-    : public __hash_base<size_t, u16string>
-    {
-      size_t
-      operator()(const u16string& __s) const noexcept
-      { return std::_Hash_impl::hash(__s.data(),
-                                     __s.length() * sizeof(char16_t)); }
-    };
 
-  template<>
-    struct __is_fast_hash<hash<u16string>> : std::false_type
-    { };
-
-  /// std::hash specialization for u32string.
-  template<>
-    struct hash<u32string>
-    : public __hash_base<size_t, u32string>
-    {
-      size_t
-      operator()(const u32string& __s) const noexcept
-      { return std::_Hash_impl::hash(__s.data(),
-                                     __s.length() * sizeof(char32_t)); }
-    };
-
-  template<>
-    struct __is_fast_hash<hash<u32string>> : std::false_type
-    { };
 
 #if __cplusplus >= 201402L
 
@@ -3308,30 +3140,6 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
     inline basic_string<char>
     operator""s(const char* __str, size_t __len)
     { return basic_string<char>{__str, __len}; }
-
-#ifdef _GLIBCXX_USE_WCHAR_T
-    _GLIBCXX_DEFAULT_ABI_TAG
-    inline basic_string<wchar_t>
-    operator""s(const wchar_t* __str, size_t __len)
-    { return basic_string<wchar_t>{__str, __len}; }
-#endif
-
-#ifdef _GLIBCXX_USE_CHAR8_T
-    _GLIBCXX_DEFAULT_ABI_TAG
-    inline basic_string<char8_t>
-    operator""s(const char8_t* __str, size_t __len)
-    { return basic_string<char8_t>{__str, __len}; }
-#endif
-
-    _GLIBCXX_DEFAULT_ABI_TAG
-    inline basic_string<char16_t>
-    operator""s(const char16_t* __str, size_t __len)
-    { return basic_string<char16_t>{__str, __len}; }
-
-    _GLIBCXX_DEFAULT_ABI_TAG
-    inline basic_string<char32_t>
-    operator""s(const char32_t* __str, size_t __len)
-    { return basic_string<char32_t>{__str, __len}; }
 
 #pragma GCC diagnostic pop
   } // inline namespace string_literals
