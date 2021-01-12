@@ -9,7 +9,7 @@ namespace std _GLIBCXX_VISIBILITY(default)
 {
 _GLIBCXX_BEGIN_NAMESPACE_VERSION
 
-#if _GLIBCXX_USE_CXX11_ABI
+
 
   template<typename _CharT, typename _Traits, typename _Alloc>
     const typename basic_string<_CharT, _Traits, _Alloc>::size_type
@@ -445,10 +445,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
       return __n;
     }
 
-#else  // !_GLIBCXX_USE_CXX11_ABI
-    // 略
 
-#endif  // !_GLIBCXX_USE_CXX11_ABI
    
   template<typename _CharT, typename _Traits, typename _Alloc>
     basic_string<_CharT, _Traits, _Alloc>
