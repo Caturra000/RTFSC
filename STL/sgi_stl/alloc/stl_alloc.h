@@ -15,6 +15,22 @@
  *   You should not attempt to use it directly.
  */
 
+
+
+
+
+
+
+// SGI定制的allocator为typedef __default_alloc_template<__NODE_ALLOCATOR_THREADS, 0> alloc
+// 并不包含标准中的template <typename T>（STL class-specific allocator）
+
+
+
+
+
+
+
+
 #ifndef __SGI_STL_INTERNAL_ALLOC_H
 #define __SGI_STL_INTERNAL_ALLOC_H
 
@@ -38,16 +54,6 @@
 // The allocation primitives are intended to allocate individual objects,
 // not larger arenas as with the original STL allocators.
 
-#ifndef __THROW_BAD_ALLOC
-#  if defined(__STL_NO_BAD_ALLOC) || !defined(__STL_USE_EXCEPTIONS)
-#    include <stdio.h>
-#    include <stdlib.h>
-#    define __THROW_BAD_ALLOC fprintf(stderr, "out of memory\n"); exit(1)
-#  else /* Standard conforming out-of-memory handling */
-#    include <new>
-#    define __THROW_BAD_ALLOC throw std::bad_alloc()
-#  endif
-#endif
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -57,7 +63,20 @@
 #  define __RESTRICT
 #endif
 
+
+
+
+
+// 线程安全相关
+
+
 #ifdef __STL_THREADS
+
+
+// 如果要求线程安全，由_STL_mutex_lock来实现
+
+
+
 # include <stl_threads.h>
 # define __NODE_ALLOCATOR_THREADS true
 # ifdef __STL_SGI_THREADS
@@ -88,6 +107,20 @@
 #   define __NODE_ALLOCATOR_THREADS false
 #endif
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 __STL_BEGIN_NAMESPACE
 
 #if defined(__sgi) && !defined(__GNUC__) && (_MIPS_SIM != _MIPS_SIM_ABI32)
@@ -105,6 +138,15 @@ __STL_BEGIN_NAMESPACE
 # endif
 #endif
 
+
+
+
+
+
+
+
+
+// 
 template <int __inst>
 class __malloc_alloc_template {
 
@@ -185,8 +227,31 @@ void* __malloc_alloc_template<__inst>::_S_oom_realloc(void* __p, size_t __n)
     }
 }
 
+
+
+
+
+
+
+
+
+
 typedef __malloc_alloc_template<0> malloc_alloc;
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+// 一个无状态的类型，简单封装template上_Alloc的方法
 template<class _Tp, class _Alloc>
 class simple_alloc {
 
@@ -200,6 +265,13 @@ public:
     static void deallocate(_Tp* __p)
       { _Alloc::deallocate(__p, sizeof (_Tp)); }
 };
+
+
+
+
+
+
+
 
 // Allocator adaptor to check size arguments for debugging.
 // Reports errors using assert.  Checking can be disabled with
@@ -245,12 +317,40 @@ public:
 };
 
 
+
+
+
+
+
+
+
+
+
+
 # ifdef __USE_MALLOC
 
 typedef malloc_alloc alloc;
 typedef malloc_alloc single_client_alloc;
 
 # else
+
+
+
+
+
+
+
+// SGI定制实现alloc
+
+
+
+
+
+
+
+
+
+
 
 
 // Default node allocator.
@@ -575,6 +675,37 @@ __default_alloc_template<__threads, __inst> ::_S_free_list[
 
 #endif /* ! __USE_MALLOC */
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // This implements allocators as specified in the C++ standard.  
 //
 // Note that standard-conforming allocators use many language features
@@ -582,6 +713,7 @@ __default_alloc_template<__threads, __inst> ::_S_free_list[
 // member templates, partial specialization, partial ordering of function
 // templates, the typename keyword, and the use of the template keyword
 // to refer to a template member of a dependent type.
+
 
 #ifdef __STL_USE_STD_ALLOCATORS
 
@@ -653,6 +785,28 @@ inline bool operator!=(const allocator<_T1>&, const allocator<_T2>&)
 {
   return false;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // Allocator adaptor to turn an SGI-style allocator (e.g. alloc, malloc_alloc)
 // into a standard-conforming allocator.   Note that this adaptor does
@@ -769,6 +923,42 @@ inline bool operator!=(const debug_alloc<_Alloc>&,
   return false;
 }
 #endif /* __STL_FUNCTION_TMPL_PARTIAL_ORDER */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // Another allocator adaptor: _Alloc_traits.  This serves two
 // purposes.  First, make it possible to write containers that can use
