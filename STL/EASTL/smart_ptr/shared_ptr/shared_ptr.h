@@ -67,15 +67,6 @@ EA_DISABLE_VC_WARNING(4571); // catch(...) semantics changed since Visual C++ 7.
 	#pragma once // Some compilers (e.g. VC++) benefit significantly from using this. We've measured 3-4% build speed improvements in apps as a result.
 #endif
 
-
-// 关注的点
-// 1. Deleter
-// 2. shared_from_this实现
-// 3. weak_ref计数方式
-// 4. allocator
-// 5. ref_count_sp的结构
-
-
 namespace eastl
 {
 	///////////////////////////////////////////////////////////////////////////
