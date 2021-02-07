@@ -78,7 +78,7 @@ int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *epds,
 	 * adding an epoll file descriptor inside itself.
 	 */
 	error = -EINVAL;
-	if (f.file == tf.file || !is_file_epoll(f.file))
+	if (f.file == tf.file || !is_file_epoll(f.file)) // 内部实现为 return file->f_op == &eventpoll_fops;
 		goto error_tgt_fput;
 
 	/*
@@ -118,6 +118,8 @@ int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *epds,
 	error = epoll_mutex_lock(&ep->mtx, 0, nonblock);
 	if (error)
 		goto error_tgt_fput;
+	// TODO 应该是一些check
+// SKIP START
 	if (op == EPOLL_CTL_ADD) {
 		if (!list_empty(&f.file->f_ep_links) ||
 				ep->gen == loop_check_gen ||
@@ -150,7 +152,7 @@ int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *epds,
 			}
 		}
 	}
-
+// SKIP END
 	/*
 	 * Try to lookup the file inside our RB tree, Since we grabbed "mtx"
 	 * above, we can be sure to be able to use the item looked up by
@@ -160,6 +162,7 @@ int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *epds,
 	epi = ep_find(ep, tf.file, fd);
 
 	error = -EINVAL;
+	// 核心操作，分别对应于ep_insert / ep_remove / ep_modify
 	switch (op) {
 	case EPOLL_CTL_ADD:
 		if (!epi) {
@@ -199,6 +202,146 @@ error_tgt_fput:
 error_fput:
 	fdput(f);
 error_return:
+
+	return error;
+}
+
+
+
+
+
+
+
+
+
+/*
+ * Must be called with "mtx" held.
+ */
+static int ep_insert(struct eventpoll *ep, const struct epoll_event *event,
+		     struct file *tfile, int fd, int full_check)
+{
+	int error, pwake = 0;
+	__poll_t revents;
+	long user_watches;
+	struct epitem *epi;
+	struct ep_pqueue epq;
+
+	lockdep_assert_irqs_enabled();
+
+	user_watches = atomic_long_read(&ep->user->epoll_watches);
+	if (unlikely(user_watches >= max_user_watches))
+		return -ENOSPC;
+	if (!(epi = kmem_cache_alloc(epi_cache, GFP_KERNEL)))
+		return -ENOMEM;
+
+	// 构造epi
+	/* Item initialization follow here ... */
+	INIT_LIST_HEAD(&epi->rdllink);
+	INIT_LIST_HEAD(&epi->fllink);
+	INIT_LIST_HEAD(&epi->pwqlist);
+	epi->ep = ep;
+	ep_set_ffd(&epi->ffd, tfile, fd); // 用tfile和fd构造ffd
+	epi->event = *event;
+	epi->nwait = 0;
+	epi->next = EP_UNACTIVE_PTR;
+	if (epi->event.events & EPOLLWAKEUP) {
+		error = ep_create_wakeup_source(epi);
+		if (error)
+			goto error_create_wakeup_source;
+	} else {
+		RCU_INIT_POINTER(epi->ws, NULL);
+	}
+
+	/* Add the current item to the list of active epoll hook for this file */
+	spin_lock(&tfile->f_lock);
+	list_add_tail_rcu(&epi->fllink, &tfile->f_ep_links);
+	spin_unlock(&tfile->f_lock);
+
+	/*
+	 * Add the current item to the RB tree. All RB tree operations are
+	 * protected by "mtx", and ep_insert() is called with "mtx" held.
+	 */
+	ep_rbtree_insert(ep, epi);
+
+	/* now check if we've created too many backpaths */
+	error = -EINVAL;
+	if (full_check && reverse_path_check())
+		goto error_remove_epi;
+
+	/* Initialize the poll table using the queue callback */
+	epq.epi = epi;
+	init_poll_funcptr(&epq.pt, ep_ptable_queue_proc);
+
+	/*
+	 * Attach the item to the poll hooks and get current event bits.
+	 * We can safely use the file* here because its usage count has
+	 * been increased by the caller of this function. Note that after
+	 * this operation completes, the poll callback can start hitting
+	 * the new item.
+	 */
+	revents = ep_item_poll(epi, &epq.pt, 1);
+
+	/*
+	 * We have to check if something went wrong during the poll wait queue
+	 * install process. Namely an allocation for a wait queue failed due
+	 * high memory pressure.
+	 */
+	error = -ENOMEM;
+	if (epi->nwait < 0)
+		goto error_unregister;
+
+	/* We have to drop the new item inside our item list to keep track of it */
+	write_lock_irq(&ep->lock);
+
+	/* record NAPI ID of new item if present */
+	ep_set_busy_poll_napi_id(epi);
+
+	/* If the file is already "ready" we drop it inside the ready list */
+	if (revents && !ep_is_linked(epi)) {
+		list_add_tail(&epi->rdllink, &ep->rdllist);
+		ep_pm_stay_awake(epi);
+
+		/* Notify waiting tasks that events are available */
+		if (waitqueue_active(&ep->wq))
+			wake_up(&ep->wq);
+		if (waitqueue_active(&ep->poll_wait))
+			pwake++;
+	}
+
+	write_unlock_irq(&ep->lock);
+
+	atomic_long_inc(&ep->user->epoll_watches);
+
+	/* We have to call this outside the lock */
+	if (pwake)
+		ep_poll_safewake(ep, NULL);
+
+	return 0;
+
+error_unregister:
+	ep_unregister_pollwait(ep, epi);
+error_remove_epi:
+	spin_lock(&tfile->f_lock);
+	list_del_rcu(&epi->fllink);
+	spin_unlock(&tfile->f_lock);
+
+	rb_erase_cached(&epi->rbn, &ep->rbr);
+
+	/*
+	 * We need to do this because an event could have been arrived on some
+	 * allocated wait queue. Note that we don't care about the ep->ovflist
+	 * list, since that is used/cleaned only inside a section bound by "mtx".
+	 * And ep_insert() is called with "mtx" held.
+	 */
+	write_lock_irq(&ep->lock);
+	if (ep_is_linked(epi))
+		list_del_init(&epi->rdllink);
+	write_unlock_irq(&ep->lock);
+
+	wakeup_source_unregister(ep_wakeup_source(epi));
+
+error_create_wakeup_source:
+	kmem_cache_free(epi_cache, epi);
 
 	return error;
 }

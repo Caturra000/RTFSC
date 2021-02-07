@@ -1,5 +1,5 @@
 /*
- * This structure is stored inside the "private_data" member of the file
+ * This structure is stored inside the "private_data" member of the file    // 这里提到，eventpoll存储于file->private_data
  * structure and represents the main data structure for the eventpoll
  * interface.
  */
