@@ -50,7 +50,7 @@ int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *epds,
 
 	/* The target file descriptor must support poll */
 	error = -EPERM;
-	if (!file_can_poll(tf.file))
+	if (!file_can_poll(tf.file))   // 要求file_operations支持poll，内部实现为return file->f_op->poll;
 		goto error_tgt_fput;
 
 	/* Check if EPOLLWAKEUP is allowed */
