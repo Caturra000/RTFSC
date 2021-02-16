@@ -44,13 +44,16 @@
 
 
   /// This is a helper function for the sort routine.
+  // 只有大于_S_threshold的个数才会执行
+  // 如果递归深度未达到阈值（depth_limit）则会执行__unguarded_partition_pivot并两边递归处理__introsort_loop
+  // 否则直接__partial_sort
   template<typename _RandomAccessIterator, typename _Size, typename _Compare>
     void
     __introsort_loop(_RandomAccessIterator __first,
 		     _RandomAccessIterator __last,
 		     _Size __depth_limit, _Compare __comp)
     {
-      while (__last - __first > int(_S_threshold))
+      while (__last - __first > int(_S_threshold)) // 超过_S_threshold个元素才会执行整个流程
 	{
 	  if (__depth_limit == 0)
 	    {
@@ -66,6 +69,7 @@
     }
 
   /// This is a helper function for the sort routine.
+  // 大于_S_threshold对前_S_threshold元素进行insertion_sort，剩余__unguarded_insertion_sort
   template<typename _RandomAccessIterator, typename _Compare>
     void
     __final_insertion_sort(_RandomAccessIterator __first,
@@ -84,7 +88,45 @@
 
 
 
-// TODO 更多细节
+// TODO __introsort_loop部分展开
+
+
+
+  /// This is a helper function...
+  template<typename _RandomAccessIterator, typename _Compare>
+    inline _RandomAccessIterator
+    __unguarded_partition_pivot(_RandomAccessIterator __first,
+				_RandomAccessIterator __last, _Compare __comp)
+    {
+      _RandomAccessIterator __mid = __first + (__last - __first) / 2;
+      /// Swaps the median value of *__a, *__b and *__c under __comp to *__result
+      /// 函数签名__move_median_to_first(_Iterator __result,_Iterator __a, _Iterator __b, _Iterator __c, _Compare __comp)
+      std::__move_median_to_first(__first, __first + 1, __mid, __last - 1,
+				  __comp);
+      return std::__unguarded_partition(__first + 1, __last, __first, __comp);
+    }
+
+
+  /// This is a helper function...
+  template<typename _RandomAccessIterator, typename _Compare>
+    _RandomAccessIterator
+    __unguarded_partition(_RandomAccessIterator __first,
+			  _RandomAccessIterator __last,
+			  _RandomAccessIterator __pivot, _Compare __comp)
+    {
+      while (true)
+	{
+	  while (__comp(__first, __pivot))
+	    ++__first;
+	  --__last;
+	  while (__comp(__pivot, __last))
+	    --__last;
+	  if (!(__first < __last))
+	    return __first;
+	  std::iter_swap(__first, __last);
+	  ++__first;
+	}
+    }
 
 
 
@@ -92,9 +134,61 @@
 
 
 
+// TODO __final_insertion_sort部分展开
+
+  /// This is a helper function for the sort routine.
+  template<typename _RandomAccessIterator, typename _Compare>
+    void
+    __insertion_sort(_RandomAccessIterator __first,
+		     _RandomAccessIterator __last, _Compare __comp)
+    {
+      if (__first == __last) return;
+
+      for (_RandomAccessIterator __i = __first + 1; __i != __last; ++__i)
+	{
+	  if (__comp(__i, __first))
+	    {
+	      typename iterator_traits<_RandomAccessIterator>::value_type
+		__val = _GLIBCXX_MOVE(*__i);
+	      _GLIBCXX_MOVE_BACKWARD3(__first, __i, __i + 1);
+	      *__first = _GLIBCXX_MOVE(__val);
+	    }
+	  else
+	    std::__unguarded_linear_insert(__i,
+				__gnu_cxx::__ops::__val_comp_iter(__comp));
+	}
+    }
+
+  /// This is a helper function for the sort routine.
+  template<typename _RandomAccessIterator, typename _Compare>
+    void
+    __unguarded_linear_insert(_RandomAccessIterator __last,
+			      _Compare __comp)
+    {
+      typename iterator_traits<_RandomAccessIterator>::value_type
+	__val = _GLIBCXX_MOVE(*__last);
+      _RandomAccessIterator __next = __last;
+      --__next;
+      while (__comp(__val, __next))
+	{
+	  *__last = _GLIBCXX_MOVE(*__next);
+	  __last = __next;
+	  --__next;
+	}
+      *__last = _GLIBCXX_MOVE(__val);
+    }
 
 
-
+  /// This is a helper function for the sort routine.
+  template<typename _RandomAccessIterator, typename _Compare>
+    inline void
+    __unguarded_insertion_sort(_RandomAccessIterator __first,
+			       _RandomAccessIterator __last, _Compare __comp)
+    {
+      for (_RandomAccessIterator __i = __first; __i != __last; ++__i)
+	std::__unguarded_linear_insert(__i,
+				__gnu_cxx::__ops::__val_comp_iter(__comp));
+    }
 
 
 // TODO __introselect只在nth_element中调用
