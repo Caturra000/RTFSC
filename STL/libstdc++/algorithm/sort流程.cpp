@@ -2,14 +2,18 @@
 // sort的具体实现为Introspective Sorting，并非纯粹的快排
 // 源码中不仅能了解内省式排序的具体实现，还有一些技巧可借鉴，
 // 包括但不限于玄学调参、if分支消去、递归和迭代混着使用的做法
-// <del>另外可学到令人血压飙升的代码风格</del>
+// <del>另外可学到令人血压飙升的代码风格和注释了等于没注释的习惯</del>
 
 // 代码展开是按照自顶向下的调用顺序
 // 分析顺序不推荐按照这个流程走，已用STEP标记顺序
 
 
 // STEP0和STEP1分析带有先判断first优化的插入排序流程
- 
+// STEP2和STEP3分析快速切分
+// STEP4分析__introsort_loop的流程和它维护的性质
+// STEP5和STEP6收尾
+// 堆排部分省略
+
   /**
    *  @brief Sort the elements of a sequence.
    *  @ingroup sorting_algorithms
@@ -39,7 +43,7 @@
       std::__sort(__first, __last, __gnu_cxx::__ops::__iter_less_iter()); // comp()使用*it1 < *it2
     }
 
-
+// STEP 6
   // sort真正的实现，可以称之为Introspective Sorting
   // 小于等于_S_threshold直接进行最朴素的插入排序（跳过__introsort_loop，只进入__final_insertion_sort不含优化的分支）
   template<typename _RandomAccessIterator, typename _Compare>
@@ -53,16 +57,26 @@
         // https://stackoverflow.com/questions/40434664/what-is-std-lg
 				std::__lg(__last - __first) * 2,   // 玄学参数，恕我没看懂这个取log实现，从结论上可认为是2*log_2(last-first)吧
 				__comp);
+    // __introsort_loop不一定对区间进行完全的排序，因此需要完整地用选择排序操作一遍，此前的区间已经大部分相对有序
 	  std::__final_insertion_sort(__first, __last, __comp);
 	}
     }
 
 //////////////////////// 主要的两个步骤
 
+// STEP 4
   /// This is a helper function for the sort routine.
   // 只有大于_S_threshold的个数才会执行
   // 如果递归深度未达到阈值（depth_limit）则会执行__unguarded_partition_pivot并两边递归处理__introsort_loop
-  // 否则直接__partial_sort
+  // 否则直接__partial_sort（堆排）
+  // ================================     ##flag #3
+  // 这里维护一个神奇的性质，就是最小值必然落于最左边的区间的前_S_threshold个元素中，
+  // 只考虑最左边的区间的轴点pivot（或者叫cut），
+  // 1. 如果在__depth_limit次数内就命中到[first + 0, first + _S_threshold)区间，最左边直接不再处理，且最小值在[first + 0, first + _S_threshold)内
+  // 2. 如果在__depth_limit次数内某一次最左边的pivot仍未命中到[first + 0, first + _S_threshold)，则继续递归处理
+  //     2.1. 如果__depth_limit-1 > 0，则继续求更左边的pivot
+  //     2.2. 如果__depth_limit-1 == 0，则进入堆排流程(3)
+  // 3. 如果已经处理到__depth_limit阈值外，堆排保证[first, 上一次的cut)的最小值就在first，并且整个子区间已排序，而因为该区间是轴点切分的，且是最左端的区间，因此最小值是整个区间（不只是子区间）的最小值
   template<typename _RandomAccessIterator, typename _Size, typename _Compare>
     void
     __introsort_loop(_RandomAccessIterator __first,
@@ -84,6 +98,7 @@
 	}
     }
 
+// STEP 5
   /// This is a helper function for the sort routine.
   // 大于_S_threshold对前_S_threshold元素进行insertion_sort，剩余__unguarded_insertion_sort
   template<typename _RandomAccessIterator, typename _Compare>
@@ -95,7 +110,7 @@
 	{
 	  std::__insertion_sort(__first, __first + int(_S_threshold), __comp);
     // 后面绝大多数元素都减少边界检查以提高性能
-    // Question. 这里直接unguarded是安全的吗，是因为快排后才安全？
+    // 这里直接unguarded是安全的，见##flag #3，可以说是整个sort流程最核心的技巧
     // 必须要求[first, first+_S_threshold)中肯定存在有比[first+_S_threshold, last)都更小的值
 	  std::__unguarded_insertion_sort(__first + int(_S_threshold), __last,
 					  __comp);
@@ -110,23 +125,32 @@
 // TODO __introsort_loop部分展开（递归深度阈值内）
 
 
-
+// STEP 2
   /// This is a helper function...
   template<typename _RandomAccessIterator, typename _Compare>
     inline _RandomAccessIterator
     __unguarded_partition_pivot(_RandomAccessIterator __first,
 				_RandomAccessIterator __last, _Compare __comp)
     {
+      // 轴点的选择是三点中值，first last和mid， Question.为啥是first+1，应该不必这样处理？
       _RandomAccessIterator __mid = __first + (__last - __first) / 2;
       /// Swaps the median value of *__a, *__b and *__c under __comp to *__result
-      /// 函数签名__move_median_to_first(_Iterator __result,_Iterator __a, _Iterator __b, _Iterator __c, _Compare __comp)
-      std::__move_median_to_first(__first, __first + 1, __mid, __last - 1,
+      // 函数签名__move_median_to_first(_Iterator __result,_Iterator __a, _Iterator __b, _Iterator __c, _Compare __comp)
+      // result是被swap，而不是直接移动覆盖掉原来的值
+      std::__move_median_to_first(__first, __first + 1, __mid, __last - 1, // ##flag #2
 				  __comp);
       return std::__unguarded_partition(__first + 1, __last, __first, __comp);
     }
 
-
+// STEP 3
   /// This is a helper function...
+  // 常规快排的选轴点过程，返回pivot所在位置，并且[first, pivot所在位置) (pivot, last)都处理好了
+  // 没有iter_swap(_pivot, first)的过程，推测return的迭代器的值可能小于pivot？ 需要看下nth_element是否使用相同的做法(快速选择的实现是由pivot确认后修正first和last，然后小范围排序来确保nth的，与返回的pivot位置无关)
+  // 按照##flag #2的做法，调用__unguarded_partition前从first到last应该是[=k][>k]...[any]...[<k]这样的区间，k是median值，any是原来的first值
+  // （也可能是[=k][<k]...[any]...[>k]），不管怎样[first+1, last)不一定有严格为k的值，因此返回值只确保[__first, return_iter) 都<=k
+  // case 0: [=<<<<<<<>>>>>>>] 此时return_iter为第一个>k
+  // case 1: [=<<<<<<===>>>>>] 此时return_iter为中间的=
+  // case 2: [=><>=>>>=<<>>><] 放过我吧
   template<typename _RandomAccessIterator, typename _Compare>
     _RandomAccessIterator
     __unguarded_partition(_RandomAccessIterator __first,
@@ -137,13 +161,16 @@
 	{
 	  while (__comp(__first, __pivot))
 	    ++__first;
+    // 此时first>=pivot
 	  --__last;
 	  while (__comp(__pivot, __last))
 	    --__last;
-	  if (!(__first < __last))
-	    return __first;
+    // 此时last<=pivot
+    // first和last都是需要交换的非法的值
+	  if (!(__first < __last)) // 如果first到达last或者交错的话则返回
+	    return __first; // 如果first和last的值都为pivot，那么也会return，但不一定该迭代器的值会等于*pivot
 	  std::iter_swap(__first, __last);
-	  ++__first;
+	  ++__first; // first和last充当lo和hi不断逼近的过程
 	}
     }
 
