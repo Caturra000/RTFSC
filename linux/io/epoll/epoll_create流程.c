@@ -20,7 +20,12 @@ SYSCALL_DEFINE1(epoll_create, int, size)
 /*
  * Open an eventpoll file descriptor.
  */
-// eventpoll是核心的数据结构，返回该fd
+// eventpoll是核心的数据结构，内核维护ep，返回关联的fd
+// 1. 检查flags
+// 2. 初始化ep，使用kmalloc
+// 3. 获取fd
+// 4. 从anon_inode获取file
+// 5. 关联fd file和ep
 static int do_epoll_create(int flags)
 {
 	int error, fd;

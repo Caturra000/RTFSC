@@ -9,6 +9,7 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 {
 	struct epoll_event epds;
 
+	// del不传递epds
 	if (ep_op_has_event(op) &&
 	    copy_from_user(&epds, event, sizeof(struct epoll_event)))
 		return -EFAULT;
@@ -27,7 +28,9 @@ static inline int ep_op_has_event(int op)
 // 2. 检测file支持poll
 // 3. EPOLLWAKEUP/EPOLLEXCLUSIVE相关[略]
 // 4. 真正处理ep
-// 5. 使用ep->mtx
+// 5. 使用ep->mtx保护红黑树
+// 6. 通过tf查找epi
+// 7. 处理
 int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *epds,
 		 bool nonblock)
 {
@@ -78,6 +81,7 @@ int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *epds,
 	 * adding an epoll file descriptor inside itself.
 	 */
 	error = -EINVAL;
+	// ep的f不能等同于epi的tf
 	if (f.file == tf.file || !is_file_epoll(f.file)) // 内部实现为 return file->f_op == &eventpoll_fops;
 		goto error_tgt_fput;
 
@@ -86,6 +90,7 @@ int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *epds,
 	 * so EPOLLEXCLUSIVE is not allowed for a EPOLL_CTL_MOD operation.
 	 * Also, we do not currently supported nested exclusive wakeups.
 	 */
+	// TODO 惊群处理？ 参考：https://lwn.net/Articles/667087/  可能单独开一个分析文件，暂不关注这些
 	if (ep_op_has_event(op) && (epds->events & EPOLLEXCLUSIVE)) {
 		if (op == EPOLL_CTL_MOD)
 			goto error_tgt_fput;
@@ -121,11 +126,11 @@ int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *epds,
 	// TODO 应该是一些check
 // SKIP START
 	if (op == EPOLL_CTL_ADD) {
-		if (!list_empty(&f.file->f_ep_links) ||
+		if (!list_empty(&f.file->f_ep_links) || // f是否在某个epoll里被嵌套监听，略
 				ep->gen == loop_check_gen ||
 						is_file_epoll(tf.file)) {
 			mutex_unlock(&ep->mtx);
-			error = epoll_mutex_lock(&epmutex, 0, nonblock);                            // TODO ep->mtx和epmutex
+			error = epoll_mutex_lock(&epmutex, 0, nonblock);
 			if (error)
 				goto error_tgt_fput;
 			loop_check_gen++;
@@ -166,9 +171,9 @@ int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *epds,
 	switch (op) {
 	case EPOLL_CTL_ADD:
 		if (!epi) {
-			epds->events |= EPOLLERR | EPOLLHUP;
+			epds->events |= EPOLLERR | EPOLLHUP; // 默认会监听EPOLLERR和EPOLLHUP
 			error = ep_insert(ep, epds, tf.file, fd, full_check);
-		} else
+		} else // 不支持重复ADD
 			error = -EEXIST;
 		break;
 	case EPOLL_CTL_DEL:
@@ -269,8 +274,9 @@ static int ep_insert(struct eventpoll *ep, const struct epoll_event *event,
 		goto error_remove_epi;
 
 	/* Initialize the poll table using the queue callback */
+	// callback放入epq
 	epq.epi = epi;
-	init_poll_funcptr(&epq.pt, ep_ptable_queue_proc);
+	init_poll_funcptr(&epq.pt, ep_ptable_queue_proc);   // pt->_qproc = qproc; pt->_key = ~(__poll_t)0; /* all events enabled */
 
 	/*
 	 * Attach the item to the poll hooks and get current event bits.
@@ -344,4 +350,107 @@ error_create_wakeup_source:
 	kmem_cache_free(epi_cache, epi);
 
 	return error;
+}
+
+
+
+/*
+ * This is the callback that is used to add our wait queue to the
+ * target file wakeup lists.
+ */
+// 放入epq的callback，主要处理pwq
+static void ep_ptable_queue_proc(struct file *file, wait_queue_head_t *whead,
+				 poll_table *pt)
+{
+	struct ep_pqueue *epq = container_of(pt, struct ep_pqueue, pt);
+	struct epitem *epi = epq->epi;
+	struct eppoll_entry *pwq;
+
+	if (unlikely(!epi))	// an earlier allocation has failed
+		return;
+
+	pwq = kmem_cache_alloc(pwq_cache, GFP_KERNEL);
+	if (unlikely(!pwq)) {
+		epq->epi = NULL;
+		return;
+	}
+
+	init_waitqueue_func_entry(&pwq->wait, ep_poll_callback);
+	pwq->whead = whead;
+	pwq->base = epi;
+	if (epi->event.events & EPOLLEXCLUSIVE)
+		add_wait_queue_exclusive(whead, &pwq->wait);
+	else
+		add_wait_queue(whead, &pwq->wait);
+	pwq->next = epi->pwqlist;
+	epi->pwqlist = pwq;
+}
+
+
+
+
+
+/*
+ * Differs from ep_eventpoll_poll() in that internal callers already have
+ * the ep->mtx so we need to start from depth=1, such that mutex_lock_nested()
+ * is correctly annotated.
+ */
+static __poll_t ep_item_poll(const struct epitem *epi, poll_table *pt,
+				 int depth)
+{
+	struct file *file = epi->ffd.file;
+	__poll_t res;
+
+	pt->_key = epi->event.events;
+	if (!is_file_epoll(file))
+		res = vfs_poll(file, pt);
+	else
+		res = __ep_eventpoll_poll(file, pt, depth);
+	return res & epi->event.events;
+}
+
+
+static __poll_t __ep_eventpoll_poll(struct file *file, poll_table *wait, int depth)
+{
+	struct eventpoll *ep = file->private_data;
+	LIST_HEAD(txlist);
+	struct epitem *epi, *tmp;
+	poll_table pt;
+	__poll_t res = 0;
+
+	init_poll_funcptr(&pt, NULL);
+
+	/* Insert inside our poll wait queue */
+	poll_wait(file, &ep->poll_wait, wait);
+
+	/*
+	 * Proceed to find out if wanted events are really available inside
+	 * the ready list.
+	 */
+	mutex_lock_nested(&ep->mtx, depth);
+	ep_start_scan(ep, &txlist);
+	list_for_each_entry_safe(epi, tmp, &txlist, rdllink) {
+		if (ep_item_poll(epi, &pt, depth + 1)) {
+			res = EPOLLIN | EPOLLRDNORM;
+			break;
+		} else {
+			/*
+			 * Item has been dropped into the ready list by the poll
+			 * callback, but it's not actually ready, as far as
+			 * caller requested events goes. We can remove it here.
+			 */
+			__pm_relax(ep_wakeup_source(epi));
+			list_del_init(&epi->rdllink);
+		}
+	}
+	ep_done_scan(ep, &txlist);
+	mutex_unlock(&ep->mtx);
+	return res;
+}
+
+// 分布：/include/linux/poll.h
+static inline void poll_wait(struct file * filp, wait_queue_head_t * wait_address, poll_table *p)
+{
+	if (p && p->_qproc && wait_address)
+		p->_qproc(filp, wait_address, p);
 }
