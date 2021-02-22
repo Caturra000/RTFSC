@@ -41,3 +41,18 @@ struct file {
 	errseq_t		f_sb_err; /* for syncfs */
 } __randomize_layout
   __attribute__((aligned(4)));	/* lest something weird decides that 2 is OK */
+
+
+
+
+static inline struct file *get_file(struct file *f)
+{
+	atomic_long_inc(&f->f_count);
+	return f;
+}
+
+static inline void file_accessed(struct file *file)
+{
+	if (!(file->f_flags & O_NOATIME))
+		touch_atime(&file->f_path);
+}
