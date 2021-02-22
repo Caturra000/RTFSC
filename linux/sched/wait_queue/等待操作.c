@@ -69,3 +69,72 @@ do {									\
 	finish_wait(&wq, &__wait);					\
 __out:	__ret;								\
 })
+
+long prepare_to_wait_event(wait_queue_head_t *q, wait_queue_t *wait, int state)
+{
+	unsigned long flags;
+	long ret = 0;
+
+	spin_lock_irqsave(&q->lock, flags);
+	if (unlikely(signal_pending_state(state, current))) {
+		/*
+		 * Exclusive waiter must not fail if it was selected by wakeup,
+		 * it should "consume" the condition we were waiting for.
+		 *
+		 * The caller will recheck the condition and return success if
+		 * we were already woken up, we can not miss the event because
+		 * wakeup locks/unlocks the same q->lock.
+		 *
+		 * But we need to ensure that set-condition + wakeup after that
+		 * can't see us, it should wake up another exclusive waiter if
+		 * we fail.
+		 */
+		list_del_init(&wait->task_list);
+		ret = -ERESTARTSYS;
+	} else {
+		if (list_empty(&wait->task_list)) {
+			if (wait->flags & WQ_FLAG_EXCLUSIVE)
+				__add_wait_queue_tail(q, wait);
+			else
+				__add_wait_queue(q, wait);
+		}
+		set_current_state(state);
+	}
+	spin_unlock_irqrestore(&q->lock, flags);
+
+	return ret;
+}
+
+/**
+ * finish_wait - clean up after waiting in a queue
+ * @q: waitqueue waited on
+ * @wait: wait descriptor
+ *
+ * Sets current thread back to running state and removes
+ * the wait descriptor from the given waitqueue if still
+ * queued.
+ */
+void finish_wait(wait_queue_head_t *q, wait_queue_t *wait)
+{
+	unsigned long flags;
+
+	__set_current_state(TASK_RUNNING);
+	/*
+	 * We can check for list emptiness outside the lock
+	 * IFF:
+	 *  - we use the "careful" check that verifies both
+	 *    the next and prev pointers, so that there cannot
+	 *    be any half-pending updates in progress on other
+	 *    CPU's that we haven't seen yet (and that might
+	 *    still change the stack area.
+	 * and
+	 *  - all other users take the lock (ie we can only
+	 *    have _one_ other CPU that looks at or modifies
+	 *    the list).
+	 */
+	if (!list_empty_careful(&wait->task_list)) {
+		spin_lock_irqsave(&q->lock, flags);
+		list_del_init(&wait->task_list);
+		spin_unlock_irqrestore(&q->lock, flags);
+	}
+}
