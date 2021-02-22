@@ -49,6 +49,7 @@ do {									\
 		__wait.flags = 0;					\
 									\
 	for (;;) {							\
+		// wait加入到wq，并把current state设为TASK_UNINTERRUPTIBLE
 		long __int = prepare_to_wait_event(&wq, &__wait, state);\
 									\
 		if (condition)						\
@@ -66,6 +67,7 @@ do {									\
 									\
 		cmd;							\
 	}								\
+	// 恢复为TASK_RUNNING
 	finish_wait(&wq, &__wait);					\
 __out:	__ret;								\
 })
@@ -93,6 +95,7 @@ long prepare_to_wait_event(wait_queue_head_t *q, wait_queue_t *wait, int state)
 		ret = -ERESTARTSYS;
 	} else {
 		if (list_empty(&wait->task_list)) {
+			// exclusive放在q尾部，否则放入头部
 			if (wait->flags & WQ_FLAG_EXCLUSIVE)
 				__add_wait_queue_tail(q, wait);
 			else
