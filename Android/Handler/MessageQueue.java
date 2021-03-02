@@ -6,6 +6,11 @@
  * <p>You can retrieve the MessageQueue for the current thread with
  * {@link Looper#myQueue() Looper.myQueue()}.
  */
+// 虽然说是msg容器，但作为底层还有有不少复杂的实现，比如
+// idle handler，见queueIdle()的接口说明
+// sync barrier，见postSyncBarrier()的官方注释
+// native epoll，见next()中调用epoll_wait和一堆native方法
+// 额外的fd监听，见addOnFileDescriptorEventListener()
 public final class MessageQueue {
     private static final String TAG = "MessageQueue";
     private static final boolean DEBUG = false;
@@ -249,6 +254,7 @@ public final class MessageQueue {
                         msg = msg.next;
                     } while (msg != null && !msg.isAsynchronous());
                 }
+                // msg为null或者是一个async msg
                 if (msg != null) {
                     if (now < msg.when) {
                         // Next message is not ready.  Set a timeout to wake up when it is ready.
@@ -370,6 +376,8 @@ public final class MessageQueue {
      *
      * @hide
      */
+    // 大概就是说，如果MQ在next过程中触发到某一个同步屏障，那么所有sync的msg都不会从next中获得，而只获取带有async标记的msg，直到取消屏障才恢复常规逻辑
+    // 在消息循环下，可以认为存在屏障 == 优先级降低
     @UnsupportedAppUsage
     @TestApi
     public int postSyncBarrier() {
@@ -394,12 +402,14 @@ public final class MessageQueue {
                     p = p.next;
                 }
             }
+            // 插入
             if (prev != null) { // invariant: p == prev.next
                 msg.next = p;
                 prev.next = msg;
+                // 作为list head的mMessages仍未被消费，不做处理
             } else {
                 msg.next = p;
-                mMessages = msg;
+                mMessages = msg; // mMessages就是msg list head
             }
             return token;
         }
@@ -423,7 +433,7 @@ public final class MessageQueue {
         synchronized (this) {
             Message prev = null;
             Message p = mMessages;
-            while (p != null && (p.target != null || p.arg1 != token)) {
+            while (p != null && (p.target != null || p.arg1 != token)) { // barrier条件为p.target==null && p.arg1为某个token
                 prev = p;
                 p = p.next;
             }
