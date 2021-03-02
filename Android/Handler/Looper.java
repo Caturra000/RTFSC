@@ -251,19 +251,6 @@ public final class Looper {
         }
     }
 
-    private static boolean showSlowLog(long threshold, long measureStart, long measureEnd,
-            String what, Message msg) {
-        final long actualTime = measureEnd - measureStart;
-        if (actualTime < threshold) {
-            return false;
-        }
-        // For slow delivery, the current message isn't really important, but log it anyway.
-        Slog.w(TAG, "Slow " + what + " took " + actualTime + "ms "
-                + Thread.currentThread().getName() + " h="
-                + msg.target.getClass().getName() + " c=" + msg.callback + " m=" + msg.what);
-        return true;
-    }
-
     /**
      * Return the Looper object associated with the current thread.  Returns
      * null if the calling thread is not associated with a Looper.
@@ -293,33 +280,6 @@ public final class Looper {
         return Thread.currentThread() == mThread;
     }
 
-    /**
-     * Control logging of messages as they are processed by this Looper.  If
-     * enabled, a log message will be written to <var>printer</var>
-     * at the beginning and ending of each message dispatch, identifying the
-     * target Handler and message contents.
-     *
-     * @param printer A Printer object that will receive log messages, or
-     * null to disable message logging.
-     */
-    public void setMessageLogging(@Nullable Printer printer) {
-        mLogging = printer;
-    }
-
-    /** {@hide} */
-    @UnsupportedAppUsage
-    public void setTraceTag(long traceTag) {
-        mTraceTag = traceTag;
-    }
-
-    /**
-     * Set a thresholds for slow dispatch/delivery log.
-     * {@hide}
-     */
-    public void setSlowLogThresholdMs(long slowDispatchThresholdMs, long slowDeliveryThresholdMs) {
-        mSlowDispatchThresholdMs = slowDispatchThresholdMs;
-        mSlowDeliveryThresholdMs = slowDeliveryThresholdMs;
-    }
 
     /**
      * Quits the looper.
@@ -375,46 +335,6 @@ public final class Looper {
         return mQueue;
     }
 
-    /**
-     * Dumps the state of the looper for debugging purposes.
-     *
-     * @param pw A printer to receive the contents of the dump.
-     * @param prefix A prefix to prepend to each line which is printed.
-     */
-    public void dump(@NonNull Printer pw, @NonNull String prefix) {
-        pw.println(prefix + toString());
-        mQueue.dump(pw, prefix + "  ", null);
-    }
-
-    /**
-     * Dumps the state of the looper for debugging purposes.
-     *
-     * @param pw A printer to receive the contents of the dump.
-     * @param prefix A prefix to prepend to each line which is printed.
-     * @param handler Only dump messages for this Handler.
-     * @hide
-     */
-    public void dump(@NonNull Printer pw, @NonNull String prefix, Handler handler) {
-        pw.println(prefix + toString());
-        mQueue.dump(pw, prefix + "  ", handler);
-    }
-
-    /** @hide */
-    public void dumpDebug(ProtoOutputStream proto, long fieldId) {
-        final long looperToken = proto.start(fieldId);
-        proto.write(LooperProto.THREAD_NAME, mThread.getName());
-        proto.write(LooperProto.THREAD_ID, mThread.getId());
-        if (mQueue != null) {
-            mQueue.dumpDebug(proto, LooperProto.QUEUE);
-        }
-        proto.end(looperToken);
-    }
-
-    @Override
-    public String toString() {
-        return "Looper (" + mThread.getName() + ", tid " + mThread.getId()
-                + ") {" + Integer.toHexString(System.identityHashCode(this)) + "}";
-    }
 
     /** {@hide} */
     public interface Observer {
