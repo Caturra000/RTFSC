@@ -459,6 +459,7 @@ public final class MessageQueue {
         }
     }
 
+    // 添加msg时，可能会native wake
     boolean enqueueMessage(Message msg, long when) {
         if (msg.target == null) {
             throw new IllegalArgumentException("Message must have a target.");
@@ -490,6 +491,7 @@ public final class MessageQueue {
                 // Inserted within the middle of the queue.  Usually we don't have to wake
                 // up the event queue unless there is a barrier at the head of the queue
                 // and the message is the earliest asynchronous message in the queue.
+                // mBlocked表示epoll_wait是否阻塞的过程，不过为啥async需要wake?
                 needWake = mBlocked && p.target == null && msg.isAsynchronous();
                 Message prev;
                 for (;;) {
