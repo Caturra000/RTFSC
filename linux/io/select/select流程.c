@@ -248,3 +248,26 @@ static int do_select(int n, fd_set_bits *fds, struct timespec64 *end_time)
 
 	return retval;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void poll_initwait(struct poll_wqueues *pwq)
+{
+	init_poll_funcptr(&pwq->pt, __pollwait);
+	pwq->polling_task = current;
+	pwq->triggered = 0;
+	pwq->error = 0;
+	pwq->table = NULL;
+	pwq->inline_index = 0;
+}
