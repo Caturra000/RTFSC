@@ -6,7 +6,7 @@ SYSCALL_DEFINE5(select, int, n, fd_set __user *, inp, fd_set __user *, outp,
 	return kern_select(n, inp, outp, exp, tvp);
 }
 
-// 处理用户态拷贝和超时计算
+// 处理超时计算
 static int kern_select(int n, fd_set __user *inp, fd_set __user *outp,
 		       fd_set __user *exp, struct timeval __user *tvp)
 {
@@ -31,7 +31,7 @@ static int kern_select(int n, fd_set __user *inp, fd_set __user *outp,
 	return ret;
 }
 
-// 构造fds
+// bitmap构造fds
 int core_sys_select(int n, fd_set __user *inp, fd_set __user *outp,
 			   fd_set __user *exp, struct timespec64 *end_time)
 {
@@ -41,6 +41,7 @@ int core_sys_select(int n, fd_set __user *inp, fd_set __user *outp,
 	size_t size, alloc_size;
 	struct fdtable *fdt;
 	/* Allocate small arguments on the stack to save memory and be faster */
+	// 尝试栈上分配，提供给void *bits，不足再kvmalloc
 	long stack_fds[SELECT_STACK_ALLOC/sizeof(long)];
 
 	ret = -EINVAL;
@@ -49,6 +50,7 @@ int core_sys_select(int n, fd_set __user *inp, fd_set __user *outp,
 
 	/* max_fds can increase, so grab it once to avoid race */
 	rcu_read_lock();
+	// 从files获取fdtable
 	fdt = files_fdtable(current->files);
 	max_fds = fdt->max_fds;
 	rcu_read_unlock();
@@ -73,6 +75,7 @@ int core_sys_select(int n, fd_set __user *inp, fd_set __user *outp,
 		if (!bits)
 			goto out_nofds;
 	}
+	// 用bits构造fds
 	fds.in      = bits;
 	fds.out     = bits +   size;
 	fds.ex      = bits + 2*size;
@@ -148,19 +151,19 @@ static int do_select(int n, fd_set_bits *fds, struct timespec64 *end_time)
 		inp = fds->in; outp = fds->out; exp = fds->ex;
 		rinp = fds->res_in; routp = fds->res_out; rexp = fds->res_ex;
 
-		for (i = 0; i < n; ++rinp, ++routp, ++rexp) {
+		for (i = 0; i < n; ++rinp, ++routp, ++rexp) { // 这里没有i迭代，单次迭代是一个long的步长
 			unsigned long in, out, ex, all_bits, bit = 1, j;
 			unsigned long res_in = 0, res_out = 0, res_ex = 0;
 			__poll_t mask;
 
 			in = *inp++; out = *outp++; ex = *exp++;
 			all_bits = in | out | ex;
-			if (all_bits == 0) {
+			if (all_bits == 0) { // 如果为0，则表示没有关注，直接跳过整个long
 				i += BITS_PER_LONG;
 				continue;
 			}
 
-			for (j = 0; j < BITS_PER_LONG; ++j, ++i, bit <<= 1) {
+			for (j = 0; j < BITS_PER_LONG; ++j, ++i, bit <<= 1) { // j用于控制bit，单次迭代是一个bit的步长
 				struct fd f;
 				if (i >= n)
 					break;
@@ -170,7 +173,7 @@ static int do_select(int n, fd_set_bits *fds, struct timespec64 *end_time)
 				if (f.file) {
 					wait_key_set(wait, in, out, bit,
 						     busy_flag);
-					mask = vfs_poll(f.file, wait);
+					mask = vfs_poll(f.file, wait); // file->f_op->poll(file, wait)
 
 					fdput(f);
 					if ((mask & POLLIN_SET) && (in & bit)) {
@@ -211,6 +214,7 @@ static int do_select(int n, fd_set_bits *fds, struct timespec64 *end_time)
 			cond_resched();
 		}
 		wait->_qproc = NULL;
+		// 4个跳出条件
 		if (retval || timed_out || signal_pending(current))
 			break;
 		if (table.error) {
