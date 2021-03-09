@@ -1,4 +1,13 @@
 
+// epoll实例返回给用户态的是一个fd
+// 对于内核，从一个fd找到一个epoll实例的操作大概这样
+// 1. 从fd找到file f（通过fdget）
+// 2. 从f.file获得成员private_data
+// 3. private_data就是ep实例（anon_inode_getfile流程传入void*）
+
+
+
+
 /*
  * The following function implements the controller interface for
  * the eventpoll file that enables the insertion/removal/change of
