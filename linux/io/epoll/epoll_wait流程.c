@@ -144,21 +144,7 @@ check_events: // 检查是否有event就绪
 
 
 
-//////// help functions
 
-
-/**
- * ep_events_available - Checks if ready events might be available.
- *
- * @ep: Pointer to the eventpoll context.
- *
- * Returns: Returns a value different than zero if ready events are available,
- *          or zero otherwise.
- */
-static inline int ep_events_available(struct eventpoll *ep)
-{
-	return !list_empty(&ep->rdllist) || ep->ovflist != EP_UNACTIVE_PTR;
-}
 
 static int ep_send_events(struct eventpoll *ep,
 			  struct epoll_event __user *events, int maxevents)
@@ -355,4 +341,21 @@ static __poll_t ep_send_events_proc(struct eventpoll *ep, struct list_head *head
 	}
 
 	return 0;
+}
+
+
+//////// help functions
+
+
+/**
+ * ep_events_available - Checks if ready events might be available.
+ *
+ * @ep: Pointer to the eventpoll context.
+ *
+ * Returns: Returns a value different than zero if ready events are available,
+ *          or zero otherwise.
+ */
+static inline int ep_events_available(struct eventpoll *ep)
+{
+	return !list_empty(&ep->rdllist) || ep->ovflist != EP_UNACTIVE_PTR;
 }

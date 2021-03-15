@@ -322,7 +322,7 @@ static int ep_insert(struct eventpoll *ep, const struct epoll_event *event,
 	// 已经ready但是没有在rdllist
 	if (revents && !ep_is_linked(epi)) {
 		list_add_tail(&epi->rdllink, &ep->rdllist);
-		ep_pm_stay_awake(epi);
+		ep_pm_stay_awake(epi); // wakeup source相关，略
 
 		/* Notify waiting tasks that events are available */
 		if (waitqueue_active(&ep->wq)) // 内部实现 !list_empty(&wq_head->head)
@@ -386,7 +386,7 @@ static __poll_t ep_item_poll(const struct epitem *epi, poll_table *pt,
 		res = vfs_poll(file, pt); // 调用file->f_op->poll(file, pt)
 	else
 		res = __ep_eventpoll_poll(file, pt, depth);
-	return res & epi->event.events;
+	return res & epi->event.events; // revents
 }
 
 /*
@@ -394,33 +394,28 @@ static __poll_t ep_item_poll(const struct epitem *epi, poll_table *pt,
  * target file wakeup lists.
  */
 // 放入epq的callback，主要处理pwq
-static void ep_ptable_queue_proc(struct file *file, wait_queue_head_t *whead,
+static void ep_ptable_queue_proc(struct file *file, wait_queue_head_t *whead, // pwq 将插入到 whead，以pipe为例，whead就是pipe->wait
 				 poll_table *pt)
 {
-	struct ep_pqueue *epq = container_of(pt, struct ep_pqueue, pt);
-	struct epitem *epi = epq->epi;
+	struct epitem *epi = ep_item_from_epqueue(pt); // // 从pt获取自身容器epq
 	struct eppoll_entry *pwq;
 
-	if (unlikely(!epi))	// an earlier allocation has failed
-		return;
-
-	pwq = kmem_cache_alloc(pwq_cache, GFP_KERNEL);
-	if (unlikely(!pwq)) {
-		epq->epi = NULL;
-		return;
+	if (epi->nwait >= 0 && (pwq = kmem_cache_alloc(pwq_cache, GFP_KERNEL))) {
+		// 并且pwq本身插入到whead中，wakeup whead时pwq调用ep_poll_callback
+		init_waitqueue_func_entry(&pwq->wait, ep_poll_callback);
+		pwq->whead = whead;
+		pwq->base = epi;
+		if (epi->event.events & EPOLLEXCLUSIVE)
+			add_wait_queue_exclusive(whead, &pwq->wait);
+		else
+			add_wait_queue(whead, &pwq->wait);
+		list_add_tail(&pwq->llink, &epi->pwqlist); // pwq也挂到epi->pwqlist上
+		epi->nwait++;
+	} else {
+		/* We have to signal that an error occurred */
+		epi->nwait = -1;
 	}
-
-	init_waitqueue_func_entry(&pwq->wait, ep_poll_callback);
-	pwq->whead = whead;
-	pwq->base = epi;
-	if (epi->event.events & EPOLLEXCLUSIVE)
-		add_wait_queue_exclusive(whead, &pwq->wait);
-	else
-		add_wait_queue(whead, &pwq->wait);
-	pwq->next = epi->pwqlist;
-	epi->pwqlist = pwq;
 }
-
 
 
 // 略
@@ -462,38 +457,23 @@ static __poll_t __ep_eventpoll_poll(struct file *file, poll_table *wait, int dep
 	return res;
 }
 
-// 分布：/include/linux/poll.h
-static inline void poll_wait(struct file * filp, wait_queue_head_t * wait_address, poll_table *p)
-{
-	if (p && p->_qproc && wait_address)
-		p->_qproc(filp, wait_address, p);
-}
-
 /*
  * This is the callback that is passed to the wait queue wakeup
  * mechanism. It is called by the stored file descriptors when they
  * have events to report.
  */
-static int ep_poll_callback(wait_queue_t *wait, unsigned mode, int sync, void *key)
+static int ep_poll_callback(wait_queue_entry_t *wait, unsigned mode, int sync, void *key)
 {
 	int pwake = 0;
 	unsigned long flags;
 	struct epitem *epi = ep_item_from_wait(wait);
 	struct eventpoll *ep = epi->ep;
+	__poll_t pollflags = key_to_poll(key);
 	int ewake = 0;
 
-	if ((unsigned long)key & POLLFREE) {
-		ep_pwq_from_wait(wait)->whead = NULL;
-		/*
-		 * whead = NULL above can race with ep_remove_wait_queue()
-		 * which can do another remove_wait_queue() after us, so we
-		 * can't use __remove_wait_queue(). whead->lock is held by
-		 * the caller.
-		 */
-		list_del_init(&wait->task_list);
-	}
+	spin_lock_irqsave(&ep->wq.lock, flags);
 
-	spin_lock_irqsave(&ep->lock, flags);
+	ep_set_busy_poll_napi_id(epi);
 
 	/*
 	 * If the event mask does not contain any poll(2) event, we consider the
@@ -510,7 +490,7 @@ static int ep_poll_callback(wait_queue_t *wait, unsigned mode, int sync, void *k
 	 * callback. We need to be able to handle both cases here, hence the
 	 * test for "key" != NULL before the event match test.
 	 */
-	if (key && !((unsigned long) key & epi->event.events))
+	if (pollflags && !(pollflags & epi->event.events))
 		goto out_unlock;
 
 	/*
@@ -519,7 +499,7 @@ static int ep_poll_callback(wait_queue_t *wait, unsigned mode, int sync, void *k
 	 * semantics). All the events that happen during that period of time are
 	 * chained in ep->ovflist and requeued later on.
 	 */
-	if (unlikely(ep->ovflist != EP_UNACTIVE_PTR)) {
+	if (ep->ovflist != EP_UNACTIVE_PTR) {
 		if (epi->next == EP_UNACTIVE_PTR) {
 			epi->next = ep->ovflist;
 			ep->ovflist = epi;
@@ -536,7 +516,7 @@ static int ep_poll_callback(wait_queue_t *wait, unsigned mode, int sync, void *k
 	}
 
 	/* If this file is already in the ready list we exit soon */
-	if (!ep_is_linked(&epi->rdllink)) {
+	if (!ep_is_linked(epi)) {
 		list_add_tail(&epi->rdllink, &ep->rdllist);
 		ep_pm_stay_awake_rcu(epi);
 	}
@@ -547,14 +527,14 @@ static int ep_poll_callback(wait_queue_t *wait, unsigned mode, int sync, void *k
 	 */
 	if (waitqueue_active(&ep->wq)) {
 		if ((epi->event.events & EPOLLEXCLUSIVE) &&
-					!((unsigned long)key & POLLFREE)) {
-			switch ((unsigned long)key & EPOLLINOUT_BITS) {
-			case POLLIN:
-				if (epi->event.events & POLLIN)
+					!(pollflags & POLLFREE)) {
+			switch (pollflags & EPOLLINOUT_BITS) {
+			case EPOLLIN:
+				if (epi->event.events & EPOLLIN)
 					ewake = 1;
 				break;
-			case POLLOUT:
-				if (epi->event.events & POLLOUT)
+			case EPOLLOUT:
+				if (epi->event.events & EPOLLOUT)
 					ewake = 1;
 				break;
 			case 0:
@@ -568,22 +548,56 @@ static int ep_poll_callback(wait_queue_t *wait, unsigned mode, int sync, void *k
 		pwake++;
 
 out_unlock:
-	spin_unlock_irqrestore(&ep->lock, flags);
+	spin_unlock_irqrestore(&ep->wq.lock, flags);
 
 	/* We have to call this outside the lock */
 	if (pwake)
 		ep_poll_safewake(&ep->poll_wait);
 
-	if (epi->event.events & EPOLLEXCLUSIVE)
-		return ewake;
+	if (!(epi->event.events & EPOLLEXCLUSIVE))
+		ewake = 1;
 
-	return 1;
+	if (pollflags & POLLFREE) {
+		/*
+		 * If we race with ep_remove_wait_queue() it can miss
+		 * ->whead = NULL and do another remove_wait_queue() after
+		 * us, so we can't use __remove_wait_queue().
+		 */
+		list_del_init(&wait->entry);
+		/*
+		 * ->whead != NULL protects us from the race with ep_free()
+		 * or ep_remove(), ep_remove_wait_queue() takes whead->lock
+		 * held by the caller. Once we nullify it, nothing protects
+		 * ep/epi or even wait.
+		 */
+		smp_store_release(&ep_pwq_from_wait(wait)->whead, NULL);
+	}
+
+	return ewake;
 }
 
+
+
+//////// help functions
+
+// typedef struct poll_table_struct poll_table
+static inline __poll_t vfs_poll(struct file *file, struct poll_table_struct *pt)
+{
+	if (unlikely(!file->f_op->poll))
+		return DEFAULT_POLLMASK;
+	return file->f_op->poll(file, pt);
+}
 
 
 /* Tells us if the item is currently linked */
 static inline int ep_is_linked(struct epitem *epi)
 {
 	return !list_empty(&epi->rdllink);
+}
+
+
+static inline void poll_wait(struct file * filp, wait_queue_head_t * wait_address, poll_table *p)
+{
+	if (p && p->_qproc && wait_address)
+		p->_qproc(filp, wait_address, p);
 }
