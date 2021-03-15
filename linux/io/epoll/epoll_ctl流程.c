@@ -13,6 +13,7 @@
  * the eventpoll file that enables the insertion/removal/change of
  * file descriptors inside the interest set.
  */
+// 处理用户态拷贝epds
 SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 		struct epoll_event __user *, event)
 {
@@ -37,9 +38,9 @@ static inline int ep_op_has_event(int op)
 // 2. 检测file支持poll
 // 3. EPOLLWAKEUP/EPOLLEXCLUSIVE相关[略]
 // 4. 真正处理ep
-// 5. 使用ep->mtx保护红黑树
-// 6. 通过tf查找epi
-// 7. 处理
+// 4.1 使用ep->mtx保护红黑树
+// 4.2 通过tf查找epi
+// 4.3 处理
 int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *epds,
 		 bool nonblock)
 {
@@ -231,6 +232,11 @@ error_return:
 /*
  * Must be called with "mtx" held.
  */
+// 1. 构造epi + 处理fllink
+// 2. epi插入到rbtree
+// 3. 构造封装类epq，注册回调ep_ptable_queue_proc
+// 4. poll调用，获取revent
+// 5. 处理ready-list
 static int ep_insert(struct eventpoll *ep, const struct epoll_event *event,
 		     struct file *tfile, int fd, int full_check)
 {
@@ -363,7 +369,25 @@ error_create_wakeup_source:
 	return error;
 }
 
+/*
+ * Differs from ep_eventpoll_poll() in that internal callers already have
+ * the ep->mtx so we need to start from depth=1, such that mutex_lock_nested()
+ * is correctly annotated.
+ */
+// 通过epi得到对应file，并调用其f_op->poll（它本身不是epoll file的话）
+static __poll_t ep_item_poll(const struct epitem *epi, poll_table *pt,
+				 int depth)
+{
+	struct file *file = epi->ffd.file;
+	__poll_t res;
 
+	pt->_key = epi->event.events;
+	if (!is_file_epoll(file)) // f->f_op == &eventpoll_fops, 非嵌套进入该分支
+		res = vfs_poll(file, pt); // 调用file->f_op->poll(file, pt)
+	else
+		res = __ep_eventpoll_poll(file, pt, depth);
+	return res & epi->event.events;
+}
 
 /*
  * This is the callback that is used to add our wait queue to the
@@ -398,27 +422,6 @@ static void ep_ptable_queue_proc(struct file *file, wait_queue_head_t *whead,
 }
 
 
-
-
-
-/*
- * Differs from ep_eventpoll_poll() in that internal callers already have
- * the ep->mtx so we need to start from depth=1, such that mutex_lock_nested()
- * is correctly annotated.
- */
-static __poll_t ep_item_poll(const struct epitem *epi, poll_table *pt,
-				 int depth)
-{
-	struct file *file = epi->ffd.file;
-	__poll_t res;
-
-	pt->_key = epi->event.events;
-	if (!is_file_epoll(file)) // f->f_op == &eventpoll_fops, 非嵌套进入该分支
-		res = vfs_poll(file, pt); // 调用file->f_op->poll(file, pt)
-	else
-		res = __ep_eventpoll_poll(file, pt, depth);
-	return res & epi->event.events;
-}
 
 // 略
 static __poll_t __ep_eventpoll_poll(struct file *file, poll_table *wait, int depth)
@@ -575,4 +578,12 @@ out_unlock:
 		return ewake;
 
 	return 1;
+}
+
+
+
+/* Tells us if the item is currently linked */
+static inline int ep_is_linked(struct epitem *epi)
+{
+	return !list_empty(&epi->rdllink);
 }
