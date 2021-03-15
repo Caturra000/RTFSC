@@ -25,6 +25,7 @@ struct epitem {
 	struct epoll_filefd ffd;
 
 	// 这里用的代码是4.19的版本，在5.x中，epitem取消了nwait，并且pwqlist类型改为eppoll_entry*
+	// 且eppoll_entry在5.x也改为通过->next遍历的单链表数据结构了
 
 	/* Number of active wait queue attached to poll operations */
 	int nwait;
