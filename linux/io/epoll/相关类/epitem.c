@@ -24,14 +24,19 @@ struct epitem {
 	/* The file descriptor information this item refers to */
 	struct epoll_filefd ffd;
 
+	// 这里用的代码是4.19的版本，在5.x中，epitem取消了nwait，并且pwqlist类型改为eppoll_entry*
+
+	/* Number of active wait queue attached to poll operations */
+	int nwait;
+
 	/* List containing poll wait queues */
-	struct eppoll_entry *pwqlist;
+	struct list_head pwqlist;
 
 	/* The "container" of this item */
 	struct eventpoll *ep;
 
 	/* List header used to link this item to the "struct file" items list */
-	struct hlist_node fllink;
+	struct list_head fllink;
 
 	/* wakeup_source used when EPOLLWAKEUP is set */
 	struct wakeup_source __rcu *ws;
