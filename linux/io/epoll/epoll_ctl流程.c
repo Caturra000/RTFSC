@@ -466,9 +466,9 @@ static int ep_poll_callback(wait_queue_entry_t *wait, unsigned mode, int sync, v
 {
 	int pwake = 0;
 	unsigned long flags;
-	struct epitem *epi = ep_item_from_wait(wait);
+	struct epitem *epi = ep_item_from_wait(wait); // 差不多是container_of
 	struct eventpoll *ep = epi->ep;
-	__poll_t pollflags = key_to_poll(key);
+	__poll_t pollflags = key_to_poll(key); // 转换类型
 	int ewake = 0;
 
 	spin_lock_irqsave(&ep->wq.lock, flags);
@@ -502,7 +502,7 @@ static int ep_poll_callback(wait_queue_entry_t *wait, unsigned mode, int sync, v
 	if (ep->ovflist != EP_UNACTIVE_PTR) {
 		if (epi->next == EP_UNACTIVE_PTR) {
 			epi->next = ep->ovflist;
-			ep->ovflist = epi;
+			ep->ovflist = epi; // 插头
 			if (epi->ws) {
 				/*
 				 * Activate ep->ws since epi->ws may get
@@ -514,7 +514,7 @@ static int ep_poll_callback(wait_queue_entry_t *wait, unsigned mode, int sync, v
 		}
 		goto out_unlock;
 	}
-
+	// 如果插入到ovflist，则不会进入ready-list
 	/* If this file is already in the ready list we exit soon */
 	if (!ep_is_linked(epi)) {
 		list_add_tail(&epi->rdllink, &ep->rdllist);
@@ -526,7 +526,7 @@ static int ep_poll_callback(wait_queue_entry_t *wait, unsigned mode, int sync, v
 	 * wait list.
 	 */
 	if (waitqueue_active(&ep->wq)) {
-		if ((epi->event.events & EPOLLEXCLUSIVE) &&
+		if ((epi->event.events & EPOLLEXCLUSIVE) &&         // TODO EPOLLEXCLUSIVE相关
 					!(pollflags & POLLFREE)) {
 			switch (pollflags & EPOLLINOUT_BITS) {
 			case EPOLLIN:

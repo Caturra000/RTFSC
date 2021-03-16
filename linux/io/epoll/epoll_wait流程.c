@@ -2,6 +2,7 @@
  * Implement the event wait interface for the eventpoll file. It is the kernel
  * part of the user space epoll_wait(2).
  */
+// 从epfd获取ep实例
 SYSCALL_DEFINE4(epoll_wait, int, epfd, struct epoll_event __user *, events,
 		int, maxevents, int, timeout)
 {
@@ -62,6 +63,13 @@ error_fput:
  * Returns: Returns the number of ready events which have been fetched, or an
  *          error code, in case of error.
  */
+// 如果timeout == 0
+// 则会直接检查event的ready-list，如果ready-list存在entry则ep_send_events，然后直接return res
+// 如果timeout > 0
+// 1. 先进入fetch流程，同时该流程仅针对就绪队列为空才执行
+// 1.1 当前调用epoll_wait的current加入到ep->wq，使用默认的callback
+// 1.2 只要被唤醒不符合条件（没event||没超时||没中断），则会再次wait
+// 2. 进入到check流程
 static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
 		   int maxevents, long timeout)
 {
@@ -137,7 +145,7 @@ check_events: // 检查是否有event就绪
 	 */
 	if (!res && eavail &&
 	    !(res = ep_send_events(ep, events, maxevents)) && !timed_out)
-		goto fetch_events;
+		goto fetch_events; // timeout==0的情况下肯定不会goto
 
 	return res;
 }
@@ -174,7 +182,7 @@ static int ep_send_events(struct eventpoll *ep,
 static int ep_scan_ready_list(struct eventpoll *ep,
 			      int (*sproc)(struct eventpoll *, // sproc == ep_send_events_proc
 					   struct list_head *, void *),
-			      void *priv, int depth, bool ep_locked)
+			      void *priv, int depth, bool ep_locked) // priv == esed
 {
 	int error, pwake = 0;
 	unsigned long flags;
@@ -198,14 +206,14 @@ static int ep_scan_ready_list(struct eventpoll *ep,
 	 * in a lockless way.
 	 */
 	spin_lock_irqsave(&ep->lock, flags);
-	list_splice_init(&ep->rdllist, &txlist);
-	ep->ovflist = NULL;
+	list_splice_init(&ep->rdllist, &txlist); // 应该是合并两个链表到txlist，然后rdllist重置为empty list
+	ep->ovflist = NULL; // 允许使用ovflist
 	spin_unlock_irqrestore(&ep->lock, flags);
 
 	/*
 	 * Now call the callback function.
 	 */
-	error = (*sproc)(ep, &txlist, priv);
+	error = (*sproc)(ep, &txlist, priv); // 见前面注释，rdllist是空的，直接由txlist负责sproc回调，因此可以in a lockless way
 
 	spin_lock_irqsave(&ep->lock, flags);
 	/*
@@ -222,7 +230,7 @@ static int ep_scan_ready_list(struct eventpoll *ep,
 		 * contain them, and the list_splice() below takes care of them.
 		 */
 		if (!ep_is_linked(&epi->rdllink)) {
-			list_add_tail(&epi->rdllink, &ep->rdllist);
+			list_add_tail(&epi->rdllink, &ep->rdllist); // 把overflow-list的swap到ready-list
 			ep_pm_stay_awake(epi);
 		}
 	}
@@ -236,7 +244,7 @@ static int ep_scan_ready_list(struct eventpoll *ep,
 	/*
 	 * Quickly re-inject items left on "txlist".
 	 */
-	list_splice(&txlist, &ep->rdllist);
+	list_splice(&txlist, &ep->rdllist); // 按理说，应该txlist没东西了？
 	__pm_relax(ep->ws);
 
 	if (!list_empty(&ep->rdllist)) {
@@ -244,6 +252,8 @@ static int ep_scan_ready_list(struct eventpoll *ep,
 		 * Wake up (if active) both the eventpoll wait list and
 		 * the ->poll() wait list (delayed after we release the lock).
 		 */
+		// 目前处于scan阶段，可能是whead wakeup过程（？），要么是放到readylist被移到txlist(至于txlist被sproc调用后还有没有插回readylist就看具体flag)，要么是刚才的overflowlist放回到readylist
+		// TODO 先看sproc回调再修改上面的解释
 		if (waitqueue_active(&ep->wq))
 			wake_up_locked(&ep->wq);
 		if (waitqueue_active(&ep->poll_wait))
@@ -261,9 +271,12 @@ static int ep_scan_ready_list(struct eventpoll *ep,
 	return error;
 }
 
-// 处理LT ET逻辑
-static __poll_t ep_send_events_proc(struct eventpoll *ep, struct list_head *head,
-			       void *priv)
+// sproc
+// 遍历txlist的epi，进行vfspoll
+// 处理要拷贝到用户态的events
+// LT逻辑，重新插回ready-list
+static __poll_t ep_send_events_proc(struct eventpoll *ep, struct list_head *head, // head == txlist
+			       void *priv) // priv只用于传递esed封装类
 {
 	struct ep_send_events_data *esed = priv;
 	__poll_t revents;
@@ -301,7 +314,7 @@ static __poll_t ep_send_events_proc(struct eventpoll *ep, struct list_head *head
 
 		list_del_init(&epi->rdllink);
 
-		revents = ep_item_poll(epi, &pt, 1);
+		revents = ep_item_poll(epi, &pt, 1); // epi进行vfspoll
 
 		/*
 		 * If the event mask intersect the caller-requested one,
@@ -312,6 +325,7 @@ static __poll_t ep_send_events_proc(struct eventpoll *ep, struct list_head *head
 		if (revents) {
 			if (__put_user(revents, &uevent->events) ||
 			    __put_user(epi->event.data, &uevent->data)) {
+				// 出错了
 				list_add(&epi->rdllink, head);
 				ep_pm_stay_awake(epi);
 				if (!esed->res)
@@ -319,7 +333,7 @@ static __poll_t ep_send_events_proc(struct eventpoll *ep, struct list_head *head
 				return 0;
 			}
 			esed->res++;
-			uevent++;
+			uevent++; // 下一个
 			if (epi->event.events & EPOLLONESHOT)
 				epi->event.events &= EP_PRIVATE_BITS;
 			else if (!(epi->event.events & EPOLLET)) {
@@ -334,8 +348,9 @@ static __poll_t ep_send_events_proc(struct eventpoll *ep, struct list_head *head
 				 * ep_scan_ready_list() holding "mtx" and the
 				 * poll callback will queue them in ep->ovflist.
 				 */
-				list_add_tail(&epi->rdllink, &ep->rdllist);
+				list_add_tail(&epi->rdllink, &ep->rdllist); // LT特色，重新插回ready-list
 				ep_pm_stay_awake(epi);
+				// 此时epi->next不需要处理？
 			}
 		}
 	}
