@@ -462,14 +462,18 @@ static __poll_t __ep_eventpoll_poll(struct file *file, poll_table *wait, int dep
  * mechanism. It is called by the stored file descriptors when they
  * have events to report.
  */
+// 1. 获取pollflags
+// 2. 检查events
+// 3. epi插入到overflow-list或者ready-list，如果是overflow-list则结束流程
+// 4. 唤醒阻塞在ep->wq的进程
 static int ep_poll_callback(wait_queue_entry_t *wait, unsigned mode, int sync, void *key)
 {
 	int pwake = 0;
 	unsigned long flags;
 	struct epitem *epi = ep_item_from_wait(wait); // 差不多是container_of
 	struct eventpoll *ep = epi->ep;
-	__poll_t pollflags = key_to_poll(key); // 转换类型
-	int ewake = 0;
+	__poll_t pollflags = key_to_poll(key); // 转换类型，回调时传入获得的flag
+	int ewake = 0; // ewake用于return，具体的含义我觉得是exclusive wake的意思，具体看__wake_up_common的逻辑
 
 	spin_lock_irqsave(&ep->wq.lock, flags);
 
@@ -481,7 +485,7 @@ static int ep_poll_callback(wait_queue_entry_t *wait, unsigned mode, int sync, v
 	 * EPOLLONESHOT bit that disables the descriptor when an event is received,
 	 * until the next EPOLL_CTL_MOD will be issued.
 	 */
-	if (!(epi->event.events & ~EP_PRIVATE_BITS))
+	if (!(epi->event.events & ~EP_PRIVATE_BITS)) // 关注event连基本的EPOLLIN之类的都没有
 		goto out_unlock;
 
 	/*
@@ -490,7 +494,7 @@ static int ep_poll_callback(wait_queue_entry_t *wait, unsigned mode, int sync, v
 	 * callback. We need to be able to handle both cases here, hence the
 	 * test for "key" != NULL before the event match test.
 	 */
-	if (pollflags && !(pollflags & epi->event.events))
+	if (pollflags && !(pollflags & epi->event.events)) // 没有用户感兴趣的event
 		goto out_unlock;
 
 	/*

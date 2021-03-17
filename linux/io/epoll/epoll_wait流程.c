@@ -314,7 +314,7 @@ static __poll_t ep_send_events_proc(struct eventpoll *ep, struct list_head *head
 
 		list_del_init(&epi->rdllink);
 
-		revents = ep_item_poll(epi, &pt, 1); // epi进行vfspoll
+		revents = ep_item_poll(epi, &pt, 1); // epi进行vfspoll，此时pt为NULL
 
 		/*
 		 * If the event mask intersect the caller-requested one,
@@ -333,7 +333,7 @@ static __poll_t ep_send_events_proc(struct eventpoll *ep, struct list_head *head
 				return 0;
 			}
 			esed->res++;
-			uevent++; // 下一个
+			uevent++; // 下一个   esed.events大小由用户指定，内核不做额外检查，直接++
 			if (epi->event.events & EPOLLONESHOT)
 				epi->event.events &= EP_PRIVATE_BITS;
 			else if (!(epi->event.events & EPOLLET)) {
@@ -348,9 +348,10 @@ static __poll_t ep_send_events_proc(struct eventpoll *ep, struct list_head *head
 				 * ep_scan_ready_list() holding "mtx" and the
 				 * poll callback will queue them in ep->ovflist.
 				 */
-				list_add_tail(&epi->rdllink, &ep->rdllist); // LT特色，重新插回ready-list
+				// LT特色，此前已经list_del_init(&epi->rdllink);重新插回ready-list
+				// 这个是在if(revents)下执行的，推测是处理完仍然有event?（不太严谨），从而实现只要大于低水位（有revents）不再阻塞
+				list_add_tail(&epi->rdllink, &ep->rdllist);
 				ep_pm_stay_awake(epi);
-				// 此时epi->next不需要处理？
 			}
 		}
 	}
