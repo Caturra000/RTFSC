@@ -271,8 +271,8 @@ static int ep_scan_ready_list(struct eventpoll *ep,
 		 * Wake up (if active) both the eventpoll wait list and
 		 * the ->poll() wait list (delayed after we release the lock).
 		 */
-		// 目前处于scan阶段，可能是whead wakeup过程（？），要么是放到readylist被移到txlist(至于txlist被sproc调用后还有没有插回readylist就看具体flag)，要么是刚才的overflowlist放回到readylist
-		// TODO 先看sproc回调再修改上面的解释
+		// 可能是监听文件状态变化wakeup导致插入新的ready-list（这种情况在ctl阶段已经wakeup-exclusive了）
+		// 也可能是前面overflowlist/txlist残留
 		if (waitqueue_active(&ep->wq))
 			wake_up_locked(&ep->wq);
 		if (waitqueue_active(&ep->poll_wait))
