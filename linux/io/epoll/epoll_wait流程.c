@@ -96,8 +96,12 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
 		goto check_events;
 	}
 
-fetch_events: // 但没有event时，current作为entry加入到ep->wq中，后面将陷入阻塞，直到存在event/超时/中断
-	spin_lock_irqsave(&ep->lock, flags);
+fetch_events: // 当没有event时，current作为entry加入到ep->wq中，后面将陷入阻塞，直到存在event/超时/中断
+
+	if (!ep_events_available(ep))
+		ep_busy_loop(ep, timed_out);
+
+	spin_lock_irq(&ep->wq.lock);
 
 	if (!ep_events_available(ep)) { // 检查rdllist ovflist，当前没有就绪的就进行阻塞
 		/*
@@ -115,6 +119,16 @@ fetch_events: // 但没有event时，current作为entry加入到ep->wq中，后�
 			 * to TASK_INTERRUPTIBLE before doing the checks.
 			 */
 			set_current_state(TASK_INTERRUPTIBLE);
+			/*
+			 * Always short-circuit for fatal signals to allow
+			 * threads to make a timely exit without the chance of
+			 * finding more events available and fetching
+			 * repeatedly.
+			 */
+			if (fatal_signal_pending(current)) {
+				res = -EINTR;
+				break;
+			}
 			if (ep_events_available(ep) || timed_out)
 				break;
 			if (signal_pending(current)) {
@@ -122,11 +136,11 @@ fetch_events: // 但没有event时，current作为entry加入到ep->wq中，后�
 				break;
 			}
 
-			spin_unlock_irqrestore(&ep->lock, flags);
+			spin_unlock_irq(&ep->wq.lock);
 			if (!schedule_hrtimeout_range(to, slack, HRTIMER_MODE_ABS))
 				timed_out = 1;
 
-			spin_lock_irqsave(&ep->lock, flags);
+			spin_lock_irq(&ep->wq.lock);
 		}
 
 		__remove_wait_queue(&ep->wq, &wait);
@@ -136,7 +150,7 @@ check_events: // 检查是否有event就绪
 	/* Is it worth to try to dig for events ? */
 	eavail = ep_events_available(ep);
 
-	spin_unlock_irqrestore(&ep->lock, flags);
+	spin_unlock_irq(&ep->wq.lock);
 
 	/*
 	 * Try to transfer events to user space. In case we get 0 events and
@@ -146,8 +160,9 @@ check_events: // 检查是否有event就绪
 	if (!res && eavail &&
 	    !(res = ep_send_events(ep, events, maxevents)) && !timed_out) // ep_send_events阶段永远返回0
 		goto fetch_events; // timeout==0的情况下肯定不会goto
-	// 上面那个if+goto觉得有点绕，如果是中断导致的，那会直接返回res(EINTR)，但是如果是处理timeout>0且尚未超时的该怎么解释？
-	// eavail也会因为LT模式不断地满足？
+	// 如果timeout>0的情况下尚未超时，会不断地在限定时间内尝试fetch_events（因为ep_send_events给出地esed.res为0返回无意义）
+	// ep_events_available == true 但是 ep_send_events == 0 可能是put_user无法完成等原因导致的
+	// 只要单次获得大于0的ep_send_events（或出错）则跳出goto循环
 	return res;
 }
 
@@ -163,7 +178,8 @@ static int ep_send_events(struct eventpoll *ep,
 	esed.maxevents = maxevents;
 	esed.events = events;
 
-	return ep_scan_ready_list(ep, ep_send_events_proc, &esed, 0, false);
+	ep_scan_ready_list(ep, ep_send_events_proc, &esed, 0, false);
+	return esed.res;
 }
 
 
@@ -180,6 +196,7 @@ static int ep_send_events(struct eventpoll *ep,
  *
  * Returns: The same integer error code returned by the @sproc callback.
  * // 令人吐槽的是sproc永远返回0，也就是说，这个scan阶段总是返回0，估计是改过很多次版本了
+ * // FIXED. 此前ep_send_events总是返回这个函数的返回值，而不是esed.res
  */
 static int ep_scan_ready_list(struct eventpoll *ep,
 			      int (*sproc)(struct eventpoll *, // sproc == ep_send_events_proc
