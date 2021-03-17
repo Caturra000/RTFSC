@@ -144,9 +144,10 @@ check_events: // 检查是否有event就绪
 	 * more luck.
 	 */
 	if (!res && eavail &&
-	    !(res = ep_send_events(ep, events, maxevents)) && !timed_out)
+	    !(res = ep_send_events(ep, events, maxevents)) && !timed_out) // ep_send_events阶段永远返回0
 		goto fetch_events; // timeout==0的情况下肯定不会goto
-
+	// 上面那个if+goto觉得有点绕，如果是中断导致的，那会直接返回res(EINTR)，但是如果是处理timeout>0且尚未超时的该怎么解释？
+	// eavail也会因为LT模式不断地满足？
 	return res;
 }
 
@@ -178,6 +179,7 @@ static int ep_send_events(struct eventpoll *ep,
  * @ep_locked: caller already holds ep->mtx
  *
  * Returns: The same integer error code returned by the @sproc callback.
+ * // 令人吐槽的是sproc永远返回0，也就是说，这个scan阶段总是返回0，估计是改过很多次版本了
  */
 static int ep_scan_ready_list(struct eventpoll *ep,
 			      int (*sproc)(struct eventpoll *, // sproc == ep_send_events_proc
@@ -187,7 +189,7 @@ static int ep_scan_ready_list(struct eventpoll *ep,
 	int error, pwake = 0;
 	unsigned long flags;
 	struct epitem *epi, *nepi;
-	LIST_HEAD(txlist);
+	LIST_HEAD(txlist); // 盲猜全称是transaction list
 
 	/*
 	 * We need to lock this because we could be hit by
@@ -244,7 +246,7 @@ static int ep_scan_ready_list(struct eventpoll *ep,
 	/*
 	 * Quickly re-inject items left on "txlist".
 	 */
-	list_splice(&txlist, &ep->rdllist); // 按理说，应该txlist没东西了？
+	list_splice(&txlist, &ep->rdllist); // 在sproc阶段，如果对于txlist的各个epi，任意一个出错（有revent但无法put_user）会重新插回txlist并退出sproc流程
 	__pm_relax(ep->ws);
 
 	if (!list_empty(&ep->rdllist)) {
