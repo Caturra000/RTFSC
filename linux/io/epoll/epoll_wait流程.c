@@ -158,7 +158,7 @@ check_events: // 检查是否有event就绪
 	 * more luck.
 	 */
 	if (!res && eavail &&
-	    !(res = ep_send_events(ep, events, maxevents)) && !timed_out) // ep_send_events阶段永远返回0
+	    !(res = ep_send_events(ep, events, maxevents)) && !timed_out)
 		goto fetch_events; // timeout==0的情况下肯定不会goto
 	// 如果timeout>0的情况下尚未超时，会不断地在限定时间内尝试fetch_events（因为ep_send_events给出地esed.res为0返回无意义）
 	// ep_events_available == true 但是 ep_send_events == 0 可能是put_user无法完成等原因导致的
