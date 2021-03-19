@@ -473,7 +473,7 @@ static int ep_poll_callback(wait_queue_entry_t *wait, unsigned mode, int sync, v
 	struct epitem *epi = ep_item_from_wait(wait); // 差不多是container_of
 	struct eventpoll *ep = epi->ep;
 	__poll_t pollflags = key_to_poll(key); // 转换类型，回调时传入获得的flag
-	int ewake = 0; // ewake用于return，具体的含义我觉得是exclusive wake的意思，具体看__wake_up_common的逻辑
+	int ewake = 0; // ewake用于return，具体的含义我觉得是允许exclusive wake的意思，具体看__wake_up_common的逻辑
 
 	spin_lock_irqsave(&ep->wq.lock, flags);
 
