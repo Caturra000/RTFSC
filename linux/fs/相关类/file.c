@@ -1,5 +1,7 @@
-// include/linux/fs.h
+// 文件：include/linux/fs.h
+// 版本：4.18.20
 
+// 对应进程内打开的文件
 struct file {
 	union {
 		struct llist_node	fu_llist;
@@ -15,9 +17,9 @@ struct file {
 	 */
 	spinlock_t		f_lock;
 	enum rw_hint		f_write_hint;
-	atomic_long_t		f_count;
-	unsigned int 		f_flags;
-	fmode_t			f_mode;
+	atomic_long_t		f_count; // 引用计数
+	unsigned int 		f_flags; // 行为
+	fmode_t			f_mode; // 权限
 	struct mutex		f_pos_lock;
 	loff_t			f_pos;
 	struct fown_struct	f_owner;
@@ -38,10 +40,8 @@ struct file {
 #endif /* #ifdef CONFIG_EPOLL */
 	struct address_space	*f_mapping;
 	errseq_t		f_wb_err;
-	errseq_t		f_sb_err; /* for syncfs */
 } __randomize_layout
   __attribute__((aligned(4)));	/* lest something weird decides that 2 is OK */
-
 
 
 
