@@ -1,6 +1,7 @@
 // 文件：/fs/namei.c
 // 版本：4.18.20
 
+// 用于路径查找
 struct nameidata {
 	struct path	path;
 	struct qstr	last;

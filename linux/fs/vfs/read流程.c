@@ -7,20 +7,24 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 
 ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)
 {
+	// 获取fd struct，从而得到file
 	struct fd f = fdget_pos(fd);
 	ssize_t ret = -EBADF;
 
 	if (f.file) {
-		loff_t pos = file_pos_read(f.file);
+		// 当前的pos
+		loff_t pos = file_pos_read(f.file); // return file->f_pos;
 		ret = vfs_read(f.file, buf, count, &pos);
+		// 有读入，更新pos
 		if (ret >= 0)
-			file_pos_write(f.file, pos);
+			file_pos_write(f.file, pos); // f.file->f_ops = pos;
 		fdput_pos(f);
 	}
 	return ret;
 }
 
 
+// 一些权限的check
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
@@ -39,6 +43,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		ret = __vfs_read(file, buf, count, pos);
 		if (ret > 0) {
 			fsnotify_access(file);
+			// CONFIG_TASK_XACCT相关，略
 			add_rchar(current, ret);
 		}
 		inc_syscr(current);
@@ -47,12 +52,14 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	return ret;
 }
 
+// 调用f_op
 ssize_t __vfs_read(struct file *file, char __user *buf, size_t count,
 		   loff_t *pos)
 {
 	if (file->f_op->read)
 		return file->f_op->read(file, buf, count, pos);
 	else if (file->f_op->read_iter)
+		// new_sync_read中会调用到f_op->read_iter
 		return new_sync_read(file, buf, count, pos);
 	else
 		return -EINVAL;
@@ -63,8 +70,10 @@ ssize_t __vfs_read(struct file *file, char __user *buf, size_t count,
 
 static ssize_t new_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos)
 {
+	// 构造用于传递数据的iov
 	struct iovec iov = { .iov_base = buf, .iov_len = len };
 	struct kiocb kiocb;
+	// 见generic_file_read_iter注释，destination for the data read
 	struct iov_iter iter;
 	ssize_t ret;
 
@@ -98,12 +107,12 @@ static inline ssize_t call_read_iter(struct file *file, struct kiocb *kio,
 ssize_t
 generic_file_read_iter(struct kiocb *iocb, struct iov_iter *iter)
 {
-	size_t count = iov_iter_count(iter);
+	size_t count = iov_iter_count(iter); // return iter->count
 	ssize_t retval = 0;
 
 	if (!count)
 		goto out; /* skip atime */
-
+	// TODO
 	if (iocb->ki_flags & IOCB_DIRECT) {
 		struct file *file = iocb->ki_filp;
 		struct address_space *mapping = file->f_mapping;

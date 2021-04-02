@@ -48,8 +48,8 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
 	struct nameidata nd;
 	int flags = op->lookup_flags;
 	struct file *filp;
-	// TODO 设置nameidata，
-	set_nameidata(&nd, dfd, pathname);
+	// 初始化nd
+	set_nameidata(&nd, dfd, pathname); /// helper function #4
 	filp = path_openat(&nd, op, flags | LOOKUP_RCU);
 	if (unlikely(filp == ERR_PTR(-ECHILD)))
 		filp = path_openat(&nd, op, flags);
@@ -143,11 +143,11 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 	for(;;) {
 		u64 hash_len;
 		int type;
-
+		// 判断进程是否有inode访问权限
 		err = may_lookup(nd);
 		if (err)
 			return err;
-
+		// 路径哈希
 		hash_len = hash_name(nd->path.dentry, name);
 
 		type = LAST_NORM;
@@ -646,4 +646,17 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 		fdput(f);
 		return s;
 	}
+}
+
+/// helper function #4
+
+static void set_nameidata(struct nameidata *p, int dfd, struct filename *name)
+{
+	struct nameidata *old = current->nameidata;
+	p->stack = p->internal;
+	p->dfd = dfd;
+	p->name = name;
+	p->total_link_count = old ? old->total_link_count : 0;
+	p->saved = old;
+	current->nameidata = p;
 }
