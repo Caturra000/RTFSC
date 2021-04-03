@@ -7,11 +7,11 @@
  * of the 'struct inode'
  */
 struct inode {
-	umode_t			i_mode;
+	umode_t			i_mode; // 文件类型和访问权限
 	unsigned short		i_opflags;
 	kuid_t			i_uid;
 	kgid_t			i_gid;
-	unsigned int		i_flags;
+	unsigned int		i_flags; // 文件系统装载标志
 
 #ifdef CONFIG_FS_POSIX_ACL
 	struct posix_acl	*i_acl;
@@ -27,7 +27,7 @@ struct inode {
 #endif
 
 	/* Stat data, not accessed from path walking */
-	unsigned long		i_ino;
+	unsigned long		i_ino; // inode编号
 	/*
 	 * Filesystems may only read i_nlink directly.  They shall use the
 	 * following functions for modification:
@@ -36,11 +36,11 @@ struct inode {
 	 *    inode_(inc|dec)_link_count
 	 */
 	union {
-		const unsigned int i_nlink;
+		const unsigned int i_nlink; // 硬链接数
 		unsigned int __i_nlink;
 	};
-	dev_t			i_rdev;
-	loff_t			i_size;
+	dev_t			i_rdev; // 用于块设备/字符设备，表示设备号
+	loff_t			i_size; // 文件长度，字节为单位
 	struct timespec64	i_atime;
 	struct timespec64	i_mtime;
 	struct timespec64	i_ctime;
@@ -58,7 +58,7 @@ struct inode {
 	unsigned long		i_state;
 	struct rw_semaphore	i_rwsem;
 
-	unsigned long		dirtied_when;	/* jiffies of first dirtying */
+	unsigned long		dirtied_when;	/* jiffies of first dirtying */ // 决定writeback时机
 	unsigned long		dirtied_time_when;
 
 	struct hlist_node	i_hash;
@@ -72,13 +72,13 @@ struct inode {
 	u16			i_wb_frn_history;
 #endif
 	struct list_head	i_lru;		/* inode LRU list */
-	struct list_head	i_sb_list;
+	struct list_head	i_sb_list; // 插入到对应sb的链表
 	struct list_head	i_wb_list;	/* backing dev writeback list */
 	union {
 		struct hlist_head	i_dentry;
 		struct rcu_head		i_rcu;
 	};
-	atomic64_t		i_version;
+	atomic64_t		i_version; // 版本号，每次使用递增
 	atomic_t		i_count;
 	atomic_t		i_dio_count;
 	atomic_t		i_writecount;
@@ -97,7 +97,7 @@ struct inode {
 		unsigned		i_dir_seq;
 	};
 
-	__u32			i_generation;
+	__u32			i_generation; // inode版本号，用于部分文件系统
 
 #ifdef CONFIG_FSNOTIFY
 	__u32			i_fsnotify_mask; /* all events this inode cares about */
