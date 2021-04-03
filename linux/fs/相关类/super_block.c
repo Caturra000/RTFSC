@@ -3,7 +3,7 @@
 
 struct super_block {
 	struct list_head	s_list;		/* Keep this first */ // 遍历所有sb对象
-	dev_t			s_dev;		/* search index; _not_ kdev_t */ // 存储sb的块设备
+	dev_t			s_dev;		/* search index; _not_ kdev_t */ // 磁盘文件系统特有，存储sb的块设备编号
 	unsigned char		s_blocksize_bits; // fs的块长度的位数
 	unsigned long		s_blocksize; // fs的块长度
 	loff_t			s_maxbytes;	/* Max file size */
@@ -28,7 +28,7 @@ struct super_block {
 #endif
 	struct hlist_bl_head	s_roots;	/* alternate root dentries for NFS */
 	struct list_head	s_mounts;	/* list of mounts; _not_ for fs use */
-	struct block_device	*s_bdev; // 对于磁盘的fs，为指向块设备描述符的指针，否则NULL
+	struct block_device	*s_bdev; // 磁盘文件系统特有，为指向块设备描述符的指针，其它fs为NULL
 	struct backing_dev_info *s_bdi; // 指向后备信息描述符的指针
 	struct mtd_info		*s_mtd;
 	struct hlist_node	s_instances;
@@ -58,7 +58,7 @@ struct super_block {
 	 * Filesystem subtype.  If non-empty the filesystem type field
 	 * in /proc/mounts will be "type.subtype"
 	 */
-	char *s_subtype;
+	char *s_subtype; // 应该应用于FUSE，内核不做区分，因此需要subtype提供给用户
 
 	const struct dentry_operations *s_d_op; /* default d_op for dentries */
 
@@ -107,8 +107,12 @@ struct super_block {
 
 	/* s_inode_list_lock protects s_inodes */
 	spinlock_t		s_inode_list_lock ____cacheline_aligned_in_smp;
-	struct list_head	s_inodes;	/* all inodes */
+	struct list_head	s_inodes;	/* all inodes */ // 管inode的表头
 
 	spinlock_t		s_inode_wblist_lock;
 	struct list_head	s_inodes_wb;	/* writeback inodes */
 } __randomize_layout;
+
+// 超级块对象存在于两个链表
+// s_list插入到管理所有的超级块对象的链表中，第一个元素为super_blocks
+// s_instances插入到super_block所属的文件系统类型的超级块实例链表中
