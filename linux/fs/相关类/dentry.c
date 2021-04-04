@@ -1,10 +1,11 @@
 // 文件：/include/linux/dcache.h
 // 版本：4.18.20
 
-// 目录项缓存，用来加速文件查找结果，建立文件名和inode的映射关系
+// 目录项，表示文件系统对象在文件系统树的位置
+// 一个inode可对应多个dentry（如硬链接）
 struct dentry {
 	/* RCU lookup touched fields */
-	unsigned int d_flags;		/* protected by d_lock */
+	unsigned int d_flags;		/* protected by d_lock */ // dentry cache标志
 	seqcount_t d_seq;		/* per dentry seqlock */
 	struct hlist_bl_node d_hash;	/* lookup hash list */
 	struct dentry *d_parent;	/* parent directory */
