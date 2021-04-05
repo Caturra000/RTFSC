@@ -87,7 +87,7 @@ static struct file *path_openat(struct nameidata *nd,
 	}
 
 	// 设置查找的起点，nd->path可能为/也可能为进程当前目录
-	s = path_init(nd, flags);
+	s = path_init(nd, flags); /// helper function #3
 	if (IS_ERR(s)) {
 		put_filp(file);
 		return ERR_CAST(s);
@@ -134,6 +134,7 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 {
 	int err;
 
+	// 多个'/'视为1个
 	while (*name=='/')
 		name++;
 	if (!*name)
@@ -154,12 +155,12 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 		if (name[0] == '.') switch (hashlen_len(hash_len)) {
 			case 2:
 				if (name[1] == '.') {
-					type = LAST_DOTDOT;
+					type = LAST_DOTDOT; // ..
 					nd->flags |= LOOKUP_JUMPED;
 				}
 				break;
 			case 1:
-				type = LAST_DOT;
+				type = LAST_DOT; // .
 		}
 		if (likely(type == LAST_NORM)) {
 			struct dentry *parent = nd->path.dentry;
@@ -557,6 +558,10 @@ over:
 
 /// helper function #3
 
+// 如果name以'/'为首，表示绝对路径，nd->path设为当前进程的根目录
+// 如果dfd为AT_FDCWD，且名字为相对路径，nd->path设为当前进程的工作目录
+// 其他情况，get_fs_pwd
+// 当前进程的根目录路径和当前目录路径都在fs_struct中
 static const char *path_init(struct nameidata *nd, unsigned flags)
 {
 	const char *s = nd->name->name;
