@@ -107,7 +107,7 @@ static inline ssize_t call_read_iter(struct file *file, struct kiocb *kio,
 ssize_t
 generic_file_read_iter(struct kiocb *iocb, struct iov_iter *iter)
 {
-	size_t count = iov_iter_count(iter); // return iter->count
+	size_t count = iov_iter_count(iter); // return iter->count 需要读取的字节数
 	ssize_t retval = 0;
 
 	if (!count)
@@ -174,7 +174,7 @@ out:
  * of the logic when it comes to error handling etc.
  */
 static ssize_t generic_file_buffered_read(struct kiocb *iocb,
-		struct iov_iter *iter, ssize_t written)
+		struct iov_iter *iter, ssize_t written) // 一般来说，written传入为0
 {
 	struct file *filp = iocb->ki_filp;
 	struct address_space *mapping = filp->f_mapping;
@@ -215,6 +215,7 @@ find_page:
 		if (!page) {
 			if (iocb->ki_flags & IOCB_NOWAIT)
 				goto would_block;
+			// 预读
 			page_cache_sync_readahead(mapping,
 					ra, filp,
 					index, last_index - index);
