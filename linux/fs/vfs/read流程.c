@@ -210,12 +210,13 @@ find_page:
 			error = -EINTR;
 			goto out;
 		}
-
+		// 在radix tree中查找page
 		page = find_get_page(mapping, index);
 		if (!page) {
 			if (iocb->ki_flags & IOCB_NOWAIT)
 				goto would_block;
 			// 预读
+			// 该函数只有在cache miss时才允许调用，会预读2MB大小
 			page_cache_sync_readahead(mapping,
 					ra, filp,
 					index, last_index - index);
@@ -223,6 +224,8 @@ find_page:
 			if (unlikely(page == NULL))
 				goto no_cached_page;
 		}
+		// TODO 这些大写开头的无法找到define
+		// ref: https://unix.stackexchange.com/questions/381983/where-is-pagewriteback-defined-in-the-4-9-linux-kernel-source
 		if (PageReadahead(page)) {
 			page_cache_async_readahead(mapping,
 					ra, filp, page,
