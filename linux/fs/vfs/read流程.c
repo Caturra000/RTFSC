@@ -280,7 +280,7 @@ page_ok:
 		 * another truncate extends the file - this is desired though).
 		 */
 
-		isize = i_size_read(inode);
+		isize = i_size_read(inode); // 返回inode->i_size
 		end_index = (isize - 1) >> PAGE_SHIFT;
 		if (unlikely(!isize || index > end_index)) {
 			put_page(page);
@@ -362,7 +362,7 @@ readpage:
 		 */
 		ClearPageError(page);
 		/* Start the actual read. The read will unlock the page. */
-		error = mapping->a_ops->readpage(filp, page);
+		error = mapping->a_ops->readpage(filp, page); // 以ext2为例，ext2_readpage
 
 		if (unlikely(error)) {
 			if (error == AOP_TRUNCATED_PAGE) {
