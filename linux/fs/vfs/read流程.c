@@ -7,7 +7,7 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 
 ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)
 {
-	// 获取fd struct，从而得到file
+	// 获取fd struct，从而得到f.file（并增加refcount）
 	struct fd f = fdget_pos(fd);
 	ssize_t ret = -EBADF;
 
@@ -18,6 +18,7 @@ ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)
 		// 有读入，更新pos
 		if (ret >= 0)
 			file_pos_write(f.file, pos); // f.file->f_ops = pos;
+		// 减少refcount
 		fdput_pos(f);
 	}
 	return ret;
@@ -35,7 +36,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		return -EINVAL;
 	if (unlikely(!access_ok(VERIFY_WRITE, buf, count)))
 		return -EFAULT;
-
+	// 检测文件部分是否有冲突的强制锁
 	ret = rw_verify_area(READ, file, pos, count);
 	if (!ret) {
 		if (count > MAX_RW_COUNT)
@@ -72,6 +73,7 @@ static ssize_t new_sync_read(struct file *filp, char __user *buf, size_t len, lo
 {
 	// 构造用于传递数据的iov
 	struct iovec iov = { .iov_base = buf, .iov_len = len };
+	// 用于跟踪IO操作的完成状态
 	struct kiocb kiocb;
 	// 见generic_file_read_iter注释，destination for the data read
 	struct iov_iter iter;
@@ -154,7 +156,7 @@ generic_file_read_iter(struct kiocb *iocb, struct iov_iter *iter)
 		    IS_DAX(inode))
 			goto out;
 	}
-
+	// 经过page cache
 	retval = generic_file_buffered_read(iocb, iter, retval);
 out:
 	return retval;
@@ -210,7 +212,7 @@ find_page:
 			error = -EINTR;
 			goto out;
 		}
-		// 在radix tree中查找page
+		// 在radix tree中查找page，index对应于page页面号
 		page = find_get_page(mapping, index);
 		if (!page) {
 			if (iocb->ki_flags & IOCB_NOWAIT)
@@ -222,10 +224,12 @@ find_page:
 					index, last_index - index);
 			page = find_get_page(mapping, index);
 			if (unlikely(page == NULL))
+				// 没有多余的page cache
 				goto no_cached_page;
 		}
 		// TODO 这些大写开头的无法找到define
 		// ref: https://unix.stackexchange.com/questions/381983/where-is-pagewriteback-defined-in-the-4-9-linux-kernel-source
+		// 使用宇宙第一IDE可以解决这个问题
 		if (PageReadahead(page)) {
 			page_cache_async_readahead(mapping,
 					ra, filp, page,
