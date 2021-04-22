@@ -235,9 +235,11 @@ find_page:
 					ra, filp, page,
 					index, last_index - index);
 		}
+		// page已经cache != page是最新的
 		if (!PageUptodate(page)) {
 			if (iocb->ki_flags & IOCB_NOWAIT) {
 				put_page(page);
+				// 提示EAGAIN
 				goto would_block;
 			}
 
