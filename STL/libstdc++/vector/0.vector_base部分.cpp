@@ -27,7 +27,7 @@
   //         struct __allocator_traits_base { struct __rebind : __replace_first_arg<_Tp, _Up> { }; } // 这里有SFINAE不止一个定义，篇幅略
   //             关于__replace_first_arg给出的解释是// Given Template<T, ...> and U return Template<U, ...>, otherwise invalid.
   // _Alloc我就默认是std::allocator<_Tp>，因此rebind后还是同一个allocator<_Tp>               TODO 这个rebind机制到底是为了处理什么？是针对特定类型Up的特化而可以强制rebind到另一个自定义allocator？
-  // 之所以选择继承是因为空基类
+  // 之所以选择继承是因为空基类                                                              Question. 我觉得甚至不继承也可以？毕竟能从模板直接拿到allocator？是为了获取到具体的对象而不是allocator类型吗？
   // 我应该先看文档比较好，这一堆template和类型的推导对于一般的流程来说没意义
 
   // _Vector_impl_data则是实际存储用到的区域
