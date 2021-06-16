@@ -6,6 +6,8 @@
 // stack并没有什么特别的，它是作为适配器（not a true container），函数均为封装函数
 // 底层实现完全依赖于typename _Sequence，默认为deque
 // 其内部成员也只有_Sequence c (underlying container)
+// Question. 从直觉上来看，vector似乎比deque更适合作为stack的容器（从实现可以看出，deque的插入复杂度常数是比较大的），为什么还是选了deque
+// 可能的答案：vector.push_back是均摊O(1), deque.push是确定的O(1)
 
 #ifndef _STL_STACK_H
 #define _STL_STACK_H 1
