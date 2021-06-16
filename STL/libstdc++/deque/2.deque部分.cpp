@@ -1,3 +1,5 @@
+// deque继承_Deque_base
+// TODO 跟踪emplace（具体实现位于deque.tcc文件）
 
   /**
    *  @brief  A standard container using fixed-size memory allocation and
@@ -29,7 +31,7 @@
    *  std::map class, and @b nodes should not be confused with
    *  std::list's usage of @a node.)
    *
-   *  A @a node has no specific type name as such, but it is referred
+   *  A @a node has no specific type name as such, but it is referred                 // 关键说明
    *  to as @a node in this file.  It is a simple array-of-Tp.  If Tp
    *  is very large, there will be one Tp element per node (i.e., an
    *  @a array of one).  For non-huge Tp's, node size is inversely
@@ -1260,7 +1262,7 @@
       void _M_push_front_aux(const value_type&);
 #else
       template<typename... _Args>
-	void _M_push_back_aux(_Args&&... __args);
+	void _M_push_back_aux(_Args&&... __args);  // 见deque.tcc
 
       template<typename... _Args>
 	void _M_push_front_aux(_Args&&... __args);

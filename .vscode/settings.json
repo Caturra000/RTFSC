@@ -12,6 +12,7 @@
         "vector": "cpp",
         "system_error": "cpp",
         "array": "cpp",
-        "iterator": "cpp"
+        "iterator": "cpp",
+        "memory_resource": "cpp"
     }
 }

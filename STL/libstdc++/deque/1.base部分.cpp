@@ -249,7 +249,7 @@
     _Deque_base<_Tp, _Alloc>::
     _M_initialize_map(size_t __num_elements)       // ##flag #0
     {
-      const size_t __num_nodes = (__num_elements/ __deque_buf_size(sizeof(_Tp))
+      const size_t __num_nodes = (__num_elements/ __deque_buf_size(sizeof(_Tp))  // map可能的大小（node个数）
 				  + 1);
 
       this->_M_impl._M_map_size = std::max((size_t) _S_initial_map_size,    // this->_M_impl._M_map_size为真正用于allocate的大小
@@ -261,14 +261,14 @@
       // the beginning of _M_map, but for small maps it may be as far in as
       // _M_map+3.
 
-      // Trick. 从中间开始处理
-      // Question. __nfinish仍是__num_nodes？__nstart前的空间何时处理？
+      // Trick. 从中间开始处理，push_front往左边走，push_back往右边走
+      // Question. __nfinish仍是__num_nodes？__nstart前的空间何时处理？ push_front满了会如何扩容？
       _Map_pointer __nstart = (this->_M_impl._M_map
 			       + (this->_M_impl._M_map_size - __num_nodes) / 2);
       _Map_pointer __nfinish = __nstart + __num_nodes;
 
       __try
-	{ _M_create_nodes(__nstart, __nfinish); }
+	{ _M_create_nodes(__nstart, __nfinish); } // 每个node分配1大小
       __catch(...)
 	{
 	  _M_deallocate_map(this->_M_impl._M_map, this->_M_impl._M_map_size);
