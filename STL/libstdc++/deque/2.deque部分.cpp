@@ -1,5 +1,8 @@
 // deque继承_Deque_base
-// TODO 跟踪emplace（具体实现位于deque.tcc文件）
+// 该文件主要是接口部分
+
+// Question. deque的map为什么不用vector封装？
+// Question. deque如何保证扩容也不会令node的引用失效？
 
   /**
    *  @brief  A standard container using fixed-size memory allocation and
@@ -1442,8 +1445,8 @@
       _M_reserve_map_at_front(size_type __nodes_to_add = 1)
       {
 	if (__nodes_to_add > size_type(this->_M_impl._M_start._M_node
-				       - this->_M_impl._M_map))
-	  _M_reallocate_map(__nodes_to_add, true);
+				       - this->_M_impl._M_map)) // map是fixed-size的，需要判断前面未allocate的node是否足够
+	  _M_reallocate_map(__nodes_to_add, true); // 见deque.tcc
       }
 
       void

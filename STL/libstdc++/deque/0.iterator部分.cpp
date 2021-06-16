@@ -4,7 +4,7 @@
 //     _Elt_pointer _M_cur;      // operator*() / operator->() 实际会获取该成员
 //     _Elt_pointer _M_first;
 //     _Elt_pointer _M_last;     // last - first == _S_buffer_size() == __deque_buf_size(sizeof(_Tp))
-//     _Map_pointer _M_node;
+//     _Map_pointer _M_node;     // iterator所在的node
 // 不考虑特殊情况，可以认为_Elt_pointer就是_Tp*，_Map_pointer是_Tp**
 // 可以推断出deque的元素是分开在多段的连续内存中存储的，通过_M_node定位到某一段，其余成员用于描述区间和当前迭代器在区间的位置
 
