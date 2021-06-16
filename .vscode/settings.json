@@ -11,6 +11,7 @@
         "string": "cpp",
         "vector": "cpp",
         "system_error": "cpp",
-        "array": "cpp"
+        "array": "cpp",
+        "iterator": "cpp"
     }
 }
