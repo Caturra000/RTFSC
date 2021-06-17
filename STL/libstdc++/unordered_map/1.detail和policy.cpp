@@ -21,6 +21,49 @@
 // _M_allocate_node()位于_Hashtable_alloc
 // _M_insert_unique_node()位于_Hashtable
 
+// 观察unordered_map.h，它具体用到的policy类为
+//  template<bool _Cache>
+//    using __umap_traits = __detail::_Hashtable_traits<_Cache, false, true>;
+// template<typename _Key,
+// 	   typename _Tp,
+// 	   typename _Hash = hash<_Key>,
+// 	   typename _Pred = std::equal_to<_Key>,
+// 	   typename _Alloc = std::allocator<std::pair<const _Key, _Tp> >,
+// 	   typename _Tr = __umap_traits<__cache_default<_Key, _Hash>::value>>
+//     using __umap_hashtable = _Hashtable<_Key, std::pair<const _Key, _Tp>,
+//                                         _Alloc, __detail::_Select1st,
+// 				        _Pred, _Hash,
+// 				        __detail::_Mod_range_hashing,
+// 				        __detail::_Default_ranged_hash,
+// 				        __detail::_Prime_rehash_policy, _Tr>;
+//
+//  template<typename _Key, typename _Tp,
+// 	   typename _Hash = hash<_Key>,
+// 	   typename _Pred = equal_to<_Key>,
+// 	   typename _Alloc = allocator<std::pair<const _Key, _Tp>>>
+//     class unordered_map
+//     {
+//       typedef __umap_hashtable<_Key, _Tp, _Hash, _Pred, _Alloc>  _Hashtable;
+//       _Hashtable _M_h;
+// ........略
+//
+// template<typename _Key, typename _Value, typename _Alloc,
+// 	   typename _ExtractKey, typename _Equal,
+// 	   typename _H1, typename _H2, typename _Hash,
+// 	   typename _RehashPolicy, typename _Traits>
+//     class _Hashtable
+// .......
+// 也就是默认情况下，
+// _ExtractKey = __detail::_Select1st
+// _Equal = std::equal_to<_Key>
+// _H1 = hash<_Key>
+// _H2 = __detail::_Mod_range_hashing
+// _Hash = __detail::_Default_ranged_hash
+// _RehashPolicy = __detail::_Prime_rehash_policy
+// _Traits = __detail::_Hashtable_traits<__cache_default<_Key, __detail::_Default_ranged_hash>::value>>
+
+
+
 #ifndef _HASHTABLE_POLICY_H
 #define _HASHTABLE_POLICY_H 1
 
