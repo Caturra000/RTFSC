@@ -1,4 +1,9 @@
-// header应该就是root
+// header维护的结点挺有意思
+// _M_node_count就是结点个数了
+// _M_header._M_parent == root
+// _M_header._M_left == leftmost
+// _M_header._M_right == rightmost
+// 这些可以在class _Rb_tree的函数 _M_root() _M_leftmost() _M_rightmost() 找出来
 
   // Helper type to manage default initialization of node count and header.
   struct _Rb_tree_header
