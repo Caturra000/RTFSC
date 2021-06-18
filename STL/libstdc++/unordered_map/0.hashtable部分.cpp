@@ -44,12 +44,13 @@
 //     using __hashtable_alloc = __detail::_Hashtable_alloc<__node_alloc_type>;
 //     using __node_alloc_type = __alloc_rebind<_Alloc, __node_type>;
 //     ====> __bucket_type = __detail::_Hashtable_alloc<__alloc_rebind<_Alloc, __node_type>>::__bucket_type
-// 其中_Hashtable_alloc<__node_alloc_type>::__bucket_type == __node_alloc_type::value_type
-//     ====> __bucket_type = __detail::_Hashtable_alloc<__alloc_rebind<_Alloc, __node_type>>::__bucket_type = __alloc_rebind<_Alloc, __node_type>::value_type
-// using __node_type = __detail::_Hash_node<_Value, __hash_cached::value>;
-// 大概可以推出，__bucket_type为一个__detail::_Hash_node<_Value, __hash_cached::value>的别名，这里简记为hash_node
+// 其中_Hashtable_alloc<__node_alloc_type>::__bucket_type == __node_base*，与__node_alloc_type类型无关
+//     using __node_base = __detail::_Hash_node_base;
+// 既__bucket_type = __detail::_Hash_node_base*
 //
-// 2. 那么hash_node（_Hash_node）又是怎么样的，跟前面的hash_node_base有怎样的扩展？
+// 2. 那么__node_type又是怎么样的
+// using __node_type = __detail::_Hash_node<_Value, __hash_cached::value>;
+// __detail::_Hash_node跟前面的__detail::_Hash_node_base有怎样的扩展？
 // template<typename _Value, bool _Cache_hash_code> struct _Hash_node : _Hash_node_value_base<_Value>
 //     这里有对_Cache_hash_code偏特化实现，
 //     如果是true的话，其内存布局会在_Hash_node_value_base的基础上加上std::size_t _M_hash_code
@@ -58,6 +59,8 @@
 // 也就是说hash_node = next指针 + value [+ hash_code]
 //
 // （一堆类型别名看的人都裂开了）
+
+// TODO 为什么_M_buckets用的是__detail::_Hash_node_base**而不直接用__detail::_Hash_node**？
 
 // 访问/插入流程：map[]插入就是调用hashtable的operator[]，但是在该文件中没有找到，是隐藏到detail::里面了，见STEP 1
 
