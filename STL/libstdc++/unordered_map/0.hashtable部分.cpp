@@ -7,7 +7,21 @@
 
 // 大概浏览一下注释，@tparam比较复杂（劝退1 ##flag #0）
 // class _Hashtable也是继承了大量的base class来隔离细节，维护者称其为类似CRTP的技巧，实现见hashtable_policy.h（劝退2 ##flag #1）
-// 虽然没用黑魔法，但是这个class的设计感觉有点头大...
+// 虽然没用黑魔法，但是这个class的设计感觉有点头大...（__gnu_pbds警告）
+// 具体展开：
+//  template<typename _Key,
+//           typename _Value,             // 对于一个[unordered_]map<_Key, _Tp>来说，可以认为在这里_Value = std::pair<const _Key, _Tp>
+//           typename _Alloc,             // allocator，一般要求_Alloc::value_type == _Value，默认policy为std::allocator<_Value>
+//           typename _ExtractKey,        // 接收一个_Value对象，返回一个_Key对象
+//           typename _Equal,             // std::equal_to
+//           typename _H1,                // 接收key，返回[0, size_t_max)的某个值，这里的key是不限定类型的
+//           typename _H2,                // 接收a和N，把a映射到[0,N)的某个值，可以认为a为某个值或者已经算好的hashcode
+//           typename _Hash,              // 接收key和N，返回[0,N)，默认的policy是return _H2(_H1(key), N)
+//           typename _RehashPolicy,      // 控制bucket的policy
+//           typename _Traits>            // 细节上的萃取汇总，接收三个template boolean，
+//                                           顺序为<是否cache hashcode, 是否constant iterator, 是否unique key>
+//                                           更准确的描述见_Hashtable_traits的注释，可以用于区分[unordered_]map和set的实现
+//                                           对于map，constant iterator为false，unique key为true
 
 // 自身的成员包含    ##flag #3
 //       __bucket_type*		_M_buckets		= &_M_single_bucket;  // == nullptr
@@ -17,6 +31,33 @@
 //       _RehashPolicy		_M_rehash_policy;
 // 其中，before_begin是一个特殊的节点，应该先参考forward_list来了解一下，先简单理解为方便插头的dummy node
 // 默认构造为=default
+
+// 关于类型的考察，
+//
+// 0. __node_base是谁（先从简单的alias开始找）
+// using __node_base = typename __hashtable_alloc::__node_base;
+// __hashtable_alloc::__node_base = __detail::_Hash_node_base;
+// 这是一个具体实现，类型无关，可以认为是一个不含数据域的单链表节点，只含next
+//
+// 1. __bucket_type具体是什么
+// using __bucket_type = typename __hashtable_alloc::__bucket_type;
+//     using __hashtable_alloc = __detail::_Hashtable_alloc<__node_alloc_type>;
+//     using __node_alloc_type = __alloc_rebind<_Alloc, __node_type>;
+//     ====> __bucket_type = __detail::_Hashtable_alloc<__alloc_rebind<_Alloc, __node_type>>::__bucket_type
+// 其中_Hashtable_alloc<__node_alloc_type>::__bucket_type == __node_alloc_type::value_type
+//     ====> __bucket_type = __detail::_Hashtable_alloc<__alloc_rebind<_Alloc, __node_type>>::__bucket_type = __alloc_rebind<_Alloc, __node_type>::value_type
+// using __node_type = __detail::_Hash_node<_Value, __hash_cached::value>;
+// 大概可以推出，__bucket_type为一个__detail::_Hash_node<_Value, __hash_cached::value>的别名，这里简记为hash_node
+//
+// 2. 那么hash_node（_Hash_node）又是怎么样的，跟前面的hash_node_base有怎样的扩展？
+// template<typename _Value, bool _Cache_hash_code> struct _Hash_node : _Hash_node_value_base<_Value>
+//     这里有对_Cache_hash_code偏特化实现，
+//     如果是true的话，其内存布局会在_Hash_node_value_base的基础上加上std::size_t _M_hash_code
+//     否则为false的话，其内存布局与_Hash_node_value_base一致
+// template<typename _Value> struct _Hash_node_value_base : _Hash_node_base
+// 也就是说hash_node = next指针 + value [+ hash_code]
+//
+// （一堆类型别名看的人都裂开了）
 
 // 访问/插入流程：map[]插入就是调用hashtable的operator[]，但是在该文件中没有找到，是隐藏到detail::里面了，见STEP 1
 

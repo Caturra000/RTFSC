@@ -60,7 +60,7 @@
 // _H2 = __detail::_Mod_range_hashing
 // _Hash = __detail::_Default_ranged_hash
 // _RehashPolicy = __detail::_Prime_rehash_policy
-// _Traits = __detail::_Hashtable_traits<__cache_default<_Key, __detail::_Default_ranged_hash>::value>>
+// _Traits = __detail::_Hashtable_traits<__cache_default<_Key, __detail::_Default_ranged_hash>::value>, false, true>
 
 
 
