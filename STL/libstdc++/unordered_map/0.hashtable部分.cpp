@@ -66,6 +66,18 @@
 
 // TODO key extraction policy
 
+// 关于allocator
+// hashtable用到的allocator是看着挺离谱的，value - node - table不同层级均有对应的allocator
+// _Alloc：针对_Value的allocator
+// __node_alloc_type：通过_Alloc rebind得到的针对__node_type的allocator，这里__node_type = __detail::_Hash_node
+// __hashtable_alloc：
+//     using __hashtable_alloc = __detail::_Hashtable_alloc<__node_alloc_type>;
+//     它是一个指定的allocator，本身也是被_Hashtable私有继承了
+//     实现上__detail::_Hashtable_alloc用到了一个ebo_helper<0, __node_alloc_type>，被别名为__ebo_node_alloc，直接看成是__node_alloc_type吧
+//     里面其实就是wrap了刚才的__node_alloc_type和_Alloc，那么问题来了，它只有__node_alloc_type，怎么又能推导出_Alloc？
+//         答案是通过typename _NodeAlloc::value_type拿到__node_type，又typename __node_type::value_type拿到_Value
+//         最后又重新通过rebind推导出一模一样的_Alloc
+//     除此之外，还有__bucket_alloc_type，这里可以看成是一个针对__detail::_Hash_node_base*的allocator，当然也是通过rebind得到的（已经品鉴的够多了）
 
 #ifndef _HASHTABLE_H
 #define _HASHTABLE_H 1
@@ -221,7 +233,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
 				    _H1, _H2, _Hash, _RehashPolicy, _Traits>,
       public __detail::_Equality<_Key, _Value, _Alloc, _ExtractKey, _Equal,
 				 _H1, _H2, _Hash, _RehashPolicy, _Traits>,
-      private __detail::_Hashtable_alloc<
+      private __detail::_Hashtable_alloc<                                            // 这里接受的typename为一个分配_Hash_node的allocator
 	__alloc_rebind<_Alloc,
 		       __detail::_Hash_node<_Value,
 					    _Traits::__hash_cached::value>>>
