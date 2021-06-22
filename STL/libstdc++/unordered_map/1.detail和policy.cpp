@@ -62,6 +62,21 @@
 // _RehashPolicy = __detail::_Prime_rehash_policy
 // _Traits = __detail::_Hashtable_traits<__cache_default<_Key, __detail::_Default_ranged_hash>::value>, false, true>
 
+// _M_hash_code()跟踪
+// 太长不看版本：默认就是调用_H1()，既std::hash
+// 长篇大论版本：
+// 前面总结的插入流程是：
+// 当unordered_map调用operator[]时，就是直接调用_Hashtable::operator[]
+// 而_Hashtable本身并没有实现，而是继承自_Map_base
+// 但是_Map_base::operator[]中对_M_hash_code的调用是把this转型为_Hashtable::_M_hash_code()
+// 重新回到_Hashtable，找到它继承的另一个CRTP接口_Hashtable_base ##flag #1
+// 可以发现_Hashtable_base继承自_Hash_code_base
+// _Hash_code_base针对_Hash = _Default_ranged_hash的偏特化实现（不管是否有__cache_hash_code）为
+//      __hash_code
+//       _M_hash_code(const _Key& __k) const
+//       {
+// 	    return _M_h1()(__k); // 省略static_assert
+//       }
 
 
 #ifndef _HASHTABLE_POLICY_H
@@ -902,7 +917,7 @@ namespace __detail
   template<typename _Key, typename _Value,
 	   typename _ExtractKey, typename _Equal,
 	   typename _H1, typename _H2, typename _Hash, typename _Traits>
-  struct _Hashtable_base
+  struct _Hashtable_base                                                           // ##flag #1
   : public _Hash_code_base<_Key, _Value, _ExtractKey, _H1, _H2, _Hash,
 			   _Traits::__hash_cached::value>,
     private _Hashtable_ebo_helper<0, _Equal>
