@@ -378,7 +378,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
     private:  // ##flag #3
       __bucket_type*		_M_buckets		= &_M_single_bucket;
       size_type			_M_bucket_count		= 1;
-      __node_base		_M_before_begin;
+      __node_base		_M_before_begin;        // 默认构造时成员_M_nxt为nullptr
       size_type			_M_element_count	= 0;
       _RehashPolicy		_M_rehash_policy;
 

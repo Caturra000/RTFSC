@@ -78,6 +78,36 @@
 // 	    return _M_h1()(__k); // 省略static_assert
 //       }
 
+// _M_bucket_index()跟踪
+// 同一个_Hash_code_base，调用_M_h2()(__c, __n)
+
+// _M_find_node()跟踪
+// 位于_Hashtable
+// 返回_M_find_before_node()->_M_nxt
+// （如果没有，则返回nullptr）
+// 先不看这个过程，因为不明确bucket是怎么装的，目前流程可认为是从构造好hashtable后直接插入，必返回nullptr
+
+// _M_allocate_node()略，就是简单的allocate
+
+// _M_insert_unique_node()跟踪
+// 位于位于_Hashtable
+// 需要用到_M_rehash_policy，作用为
+//     1. 判断是否需要rehash（通过_M_need_rehash）
+//     2. 具体rehash流程：_M_rehash和重定位__bkt（通过_M_bucket_index）
+// 插入流程走_M_store_code _M_insert_bucket_begin
+//     _M_store_code位于hash_code_base，就是存储hashcode的setter，因为可能没有，所以用函数封装一下方便重载
+//     _M_insert_bucket_begin（只分析找不到bucket的行为）
+//         分支判断蛮奇怪的，不需要判断_M_buckets为空的情况？构造完成后应该只是一个nullptr，
+//             可能是进入_M_buckets[__bkt]时由于bucket_count=1，必然__bkt=0，得到nullptr==0跳过该分支，只是用了一种我不太习惯的写法
+//         首次插入会走else分支，插入的__node会成为_M_before_begin._M_nxt（原来的next称为former）
+//             如果former是存在的，那么former原来所在的bucket也要指向__node（很显然首次插入没有，另外这里的bucket下标要经过hash_code_base取模）
+//         bucket[__bkt]指向before begin
+// 这个插入的微妙在于，指定的__bkt插入的却是begin before，begin before的next才是被插入（头插）的结点
+// 对于刚插入的情况，bucket数目显然不会增加
+// 本来构造好的_M_buckets是nullptr，插入后 _M_buckets[__bkt] = &_M_before_begin（一个预设节点）; __bkt=0 此时_M_buckets才含有_M_before_begin和插入的node(before begin.next)
+// （好累啊，写的什么鬼，直接debug跟踪算了吧）
+// TODO rehash
+
 
 #ifndef _HASHTABLE_POLICY_H
 #define _HASHTABLE_POLICY_H 1
