@@ -674,7 +674,7 @@ namespace __detail
     typedef std::size_t _State;
 
     _State
-    _M_state() const noexcept
+    _M_state() const noexcept // 用于hashtable saved_state 和 former_state
     { return _M_next_resize; }
 
     void
@@ -1100,7 +1100,7 @@ namespace __detail
       {
 	if (__n == 0)
 	  // Special case on container 1st initialization with 0 bucket count
-	  // hint. We keep _M_next_resize to 0 to make sure that next time we
+	  // hint. We keep _M_next_resize to 0 to make sure that next time we        // TODO _M_next_resize用于？尝试追踪_M_state
 	  // want to add an element allocation will take place.
 	  return 1;
 
@@ -1147,7 +1147,7 @@ namespace __detail
   _M_need_rehash(std::size_t __n_bkt, std::size_t __n_elt,
 		 std::size_t __n_ins) const
   {
-    if (__n_elt + __n_ins > _M_next_resize)
+    if (__n_elt + __n_ins > _M_next_resize) // _M_next_resize用于判断是否需要rehash
       {
 	// If _M_next_resize is 0 it means that we have nothing allocated so
 	// far and that we start inserting elements. In this case we start
