@@ -2090,16 +2090,16 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
     void
     _Hashtable<_Key, _Value, _Alloc, _ExtractKey, _Equal,
 	       _H1, _H2, _Hash, _RehashPolicy, _Traits>::
-    rehash(size_type __n)
+    rehash(size_type __n) // 这个函数内部已经不需要_M_need_rehash来判断，传入的__n由_M_need_rehash(_M_bucket_count, _M_element_count, ...)计算得出
     {
-      const __rehash_state& __saved_state = _M_rehash_policy._M_state();
+      const __rehash_state& __saved_state = _M_rehash_policy._M_state(); // 绑定的是右值，不会改变
       std::size_t __buckets
-	= std::max(_M_rehash_policy._M_bkt_for_elements(_M_element_count + 1),
+	= std::max(_M_rehash_policy._M_bkt_for_elements(_M_element_count + 1), // _M_bkt_for_elements这个函数似乎，没啥意义啊
 		   __n);
-      __buckets = _M_rehash_policy._M_next_bkt(__buckets);
+      __buckets = _M_rehash_policy._M_next_bkt(__buckets); // 获得rehash policy建议的值，一个>=__buckets的素数， 因为默认用的rehash_policy，本身就满足传入值__n为素数，这里似乎没必要了，估计是为了通用设计才多走了一步
 
       if (__buckets != _M_bucket_count)
-	_M_rehash(__buckets, __saved_state);
+	_M_rehash(__buckets, __saved_state);  // 真正的rehash过程
       else
 	// No rehash, restore previous state to keep a consistent state.
 	_M_rehash_policy._M_reset(__saved_state);
@@ -2116,7 +2116,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
     {
       __try
 	{
-	  _M_rehash_aux(__n, __unique_keys());
+	  _M_rehash_aux(__n, __unique_keys()); // map的话，应该是走true_type重载
 	}
       __catch(...)
 	{
@@ -2141,7 +2141,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
       __node_type* __p = _M_begin();
       _M_before_begin._M_nxt = nullptr;
       std::size_t __bbegin_bkt = 0;
-      while (__p)
+      while (__p) // 没啥耐心看，目测就是搬运node的过程
 	{
 	  __node_type* __next = __p->_M_next();
 	  std::size_t __bkt = __hash_code_base::_M_bucket_index(__p, __n);
@@ -2164,7 +2164,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
 
       _M_deallocate_buckets();
       _M_bucket_count = __n;
-      _M_buckets = __new_buckets;
+      _M_buckets = __new_buckets; // 整个过程都不会令迭代器失效
     }
 
   // Rehash when there can be equivalent elements, preserve their relative
