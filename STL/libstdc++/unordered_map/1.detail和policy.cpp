@@ -1089,23 +1089,23 @@ namespace __detail
 {
   // Return a prime no smaller than n.
   std::size_t
-  _Prime_rehash_policy::_M_next_bkt(std::size_t __n) const
+  _Prime_rehash_policy::_M_next_bkt(std::size_t __n) const                           // Question. _M_next_bkt是返回>=__n的大小，但是并不考虑load factor，反而是用于限制_M_next_resize，就是可能存在_M_next_bkt > _M_next_resize？和我想的不太对的上
   {
     // Optimize lookups involving the first elements of __prime_list.
     // (useful to speed-up, eg, constructors)
-    static const unsigned char __fast_bkt[] // trick. 无需lower_bound
+    static const unsigned char __fast_bkt[]                                          // trick. 无需lower_bound
       = { 2, 2, 2, 3, 5, 5, 7, 7, 11, 11, 11, 11, 13, 13 };
 
     if (__n < sizeof(__fast_bkt))
       {
 	if (__n == 0)
 	  // Special case on container 1st initialization with 0 bucket count
-	  // hint. We keep _M_next_resize to 0 to make sure that next time we        // TODO _M_next_resize用于？尝试追踪_M_state
+	  // hint. We keep _M_next_resize to 0 to make sure that next time we
 	  // want to add an element allocation will take place.
-	  return 1;
+	  return 1;                                                                  // __n = 0时是有特判处理的，令_M_next_resize保持为0，后面在_M_need_rehash()中会针对这个条件额外处理，只是省掉了flag，所以第一次看会有点费解
 
 	_M_next_resize =
-	  __builtin_floor(__fast_bkt[__n] * (double)_M_max_load_factor);
+	  __builtin_floor(__fast_bkt[__n] * (double)_M_max_load_factor);             // _M_next_resize <= _M_next_bkt(__n)
 	return __fast_bkt[__n];
       }
 
@@ -1118,17 +1118,17 @@ namespace __detail
     // iterator that can be dereferenced to get the last prime.
     constexpr auto __last_prime = __prime_list + __n_primes - 1;
 
-    const unsigned long* __next_bkt =
-      std::lower_bound(__prime_list + 6, __last_prime, __n);
+    const unsigned long* __next_bkt =                                                // __next_bkt为大于等于__n的素数
+      std::lower_bound(__prime_list + 6, __last_prime, __n);                         // trick. 前6个prime已经被前面的条件优化了，无需二分
 
     if (__next_bkt == __last_prime)
       // Set next resize to the max value so that we never try to rehash again
       // as we already reach the biggest possible bucket number.
       // Note that it might result in max_load_factor not being respected.
-      _M_next_resize = size_t(-1);
+      _M_next_resize = size_t(-1);                                                   // 跳过阈值，不再进行rehash，load factor也无效
     else
       _M_next_resize =
-	__builtin_floor(*__next_bkt * (double)_M_max_load_factor);
+	__builtin_floor(*__next_bkt * (double)_M_max_load_factor);                   // 不管怎样的条件，_M_next_resize <= _M_next_bkt(__n)
 
     return *__next_bkt;
   }
@@ -1138,7 +1138,7 @@ namespace __detail
   // make_pair(false, 0).  In principle this isn't very different from
   // _M_bkt_for_elements.
 
-  // The only tricky part is that we're caching the element count at
+  // The only tricky part is that we're caching the element count at                 // Question. 这里的caching该怎么理解，是指_M_next_resize提前计算好float的结果，所以不用每次都乘上load_factor来计算一次？
   // which we need to rehash, so we don't have to do a floating-point
   // multiply for every insertion.
 
@@ -1147,19 +1147,19 @@ namespace __detail
   _M_need_rehash(std::size_t __n_bkt, std::size_t __n_elt,
 		 std::size_t __n_ins) const
   {
-    if (__n_elt + __n_ins > _M_next_resize) // _M_next_resize用于判断是否需要rehash
+    if (__n_elt + __n_ins > _M_next_resize)                                          // _M_next_resize用于判断是否需要rehash
       {
 	// If _M_next_resize is 0 it means that we have nothing allocated so
 	// far and that we start inserting elements. In this case we start
 	// with an initial bucket size of 11.
 	double __min_bkts
-	  = std::max<std::size_t>(__n_elt + __n_ins, _M_next_resize ? 0 : 11)
-	  / (double)_M_max_load_factor;
+	  = std::max<std::size_t>(__n_elt + __n_ins, _M_next_resize ? 0 : 11)        // 当第一次调用时，是与固定值11做判断，除非是单次插入过多元素超过了11； 第二次调用时，和_M_next_resize比较的意义不大了，因为进入条件的前提是__n_elt + __n_ins > _M_next_resize，我觉得是个可以改进的点
+	  / (double)_M_max_load_factor;                                              // 即使是_M_max_load_factor为1，也不要求min_bkt必须是素数，毕竟每次都要lower_bound不值得，而是延迟到返回值阶段再进行
 	if (__min_bkts >= __n_bkt)
 	  return { true,
-	    _M_next_bkt(std::max<std::size_t>(__builtin_floor(__min_bkts) + 1,
-					      __n_bkt * _S_growth_factor)) };
-
+	    _M_next_bkt(std::max<std::size_t>(__builtin_floor(__min_bkts) + 1,       // 不管如何，返回的是一个素数，只是大小依赖于max判断可能不同
+					      __n_bkt * _S_growth_factor)) };        // Question. _M_next_resize的状态转移是不是有点奇怪？这里的函数严格上还没有进行rehash，但是rehash阈值却是一直在改变，为什么不在rehash完成后再更新？
+	                                                                             // 不管如何，只要未达最大阈值且超过最终选定的prime*load_factor，就会得到需要rehash的建议（true）
 	_M_next_resize
 	  = __builtin_floor(__n_bkt * (double)_M_max_load_factor);
 	return { false, 0 };
