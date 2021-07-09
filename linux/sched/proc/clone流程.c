@@ -170,6 +170,8 @@ static __latent_entropy struct task_struct *copy_process(
 	int retval;
 	struct task_struct *p;
 
+// SKIP START
+
 	/*
 	 * Don't allow sharing the root directory with processes in a different
 	 * namespace
@@ -216,7 +218,10 @@ static __latent_entropy struct task_struct *copy_process(
 			return ERR_PTR(-EINVAL);
 	}
 
+// SKIP END
+
 	retval = -ENOMEM;
+	// 分配task_struct，把current进程的task_struct结构dup过去
 	p = dup_task_struct(current, node);
 	if (!p)
 		goto fork_out;
@@ -260,8 +265,11 @@ static __latent_entropy struct task_struct *copy_process(
 	 * to stop root fork bombs.
 	 */
 	retval = -EAGAIN;
+	// nr_threads 当前线程数
 	if (nr_threads >= max_threads)
 		goto bad_fork_cleanup_count;
+
+	// 下面也用于初始化task_struct
 
 	delayacct_tsk_init(p);	/* Must remain after dup_task_struct() */
 	p->flags &= ~(PF_SUPERPRIV | PF_WQ_WORKER | PF_IDLE);
@@ -613,4 +621,484 @@ bad_fork_free:
 	free_task(p);
 fork_out:
 	return ERR_PTR(retval);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/// helper function
+
+static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
+{
+	struct task_struct *tsk;
+	unsigned long *stack;
+	struct vm_struct *stack_vm_area;
+	int err;
+
+	if (node == NUMA_NO_NODE)
+		node = tsk_fork_get_node(orig);
+	tsk = alloc_task_struct_node(node);
+	if (!tsk)
+		return NULL;
+
+	stack = alloc_thread_stack_node(tsk, node);
+	if (!stack)
+		goto free_tsk;
+
+	stack_vm_area = task_stack_vm_area(tsk);
+
+	err = arch_dup_task_struct(tsk, orig);
+
+	/*
+	 * arch_dup_task_struct() clobbers the stack-related fields.  Make
+	 * sure they're properly initialized before using any stack-related
+	 * functions again.
+	 */
+	tsk->stack = stack;
+#ifdef CONFIG_VMAP_STACK
+	tsk->stack_vm_area = stack_vm_area;
+#endif
+#ifdef CONFIG_THREAD_INFO_IN_TASK
+	atomic_set(&tsk->stack_refcount, 1);
+#endif
+
+	if (err)
+		goto free_stack;
+
+#ifdef CONFIG_SECCOMP
+	/*
+	 * We must handle setting up seccomp filters once we're under
+	 * the sighand lock in case orig has changed between now and
+	 * then. Until then, filter must be NULL to avoid messing up
+	 * the usage counts on the error path calling free_task.
+	 */
+	tsk->seccomp.filter = NULL;
+#endif
+
+	setup_thread_stack(tsk, orig);
+	clear_user_return_notifier(tsk);
+	clear_tsk_need_resched(tsk);
+	set_task_stack_end_magic(tsk);
+
+#ifdef CONFIG_STACKPROTECTOR
+	tsk->stack_canary = get_random_canary();
+#endif
+
+	/*
+	 * One for us, one for whoever does the "release_task()" (usually
+	 * parent)
+	 */
+	atomic_set(&tsk->usage, 2);
+#ifdef CONFIG_BLK_DEV_IO_TRACE
+	tsk->btrace_seq = 0;
+#endif
+	tsk->splice_pipe = NULL;
+	tsk->task_frag.page = NULL;
+	tsk->wake_q.next = NULL;
+
+	account_kernel_stack(tsk, 1);
+
+	kcov_task_init(tsk);
+
+#ifdef CONFIG_FAULT_INJECTION
+	tsk->fail_nth = 0;
+#endif
+
+	return tsk;
+
+free_stack:
+	free_thread_stack(tsk);
+free_tsk:
+	free_task_struct(tsk);
+	return NULL;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/// 一些细节上的处理
+// 1. 调度相关 sched_fork
+// 2. 文件系统相关 copy_fs
+// 3. 内存相关 copy_mm
+
+
+// 文件分布：/kernel/sched/core.c
+/*
+ * fork()/clone()-time setup:
+ */
+int sched_fork(unsigned long clone_flags, struct task_struct *p)
+{
+	unsigned long flags;
+	int cpu = get_cpu();
+
+	__sched_fork(clone_flags, p);
+	/*
+	 * We mark the process as NEW here. This guarantees that
+	 * nobody will actually run it, and a signal or other external
+	 * event cannot wake it up and insert it on the runqueue either.
+	 */
+	p->state = TASK_NEW;
+
+	/*
+	 * Make sure we do not leak PI boosting priority to the child.
+	 */
+	p->prio = current->normal_prio;
+
+	/*
+	 * Revert to default priority/policy on fork if requested.
+	 */
+	if (unlikely(p->sched_reset_on_fork)) {
+		if (task_has_dl_policy(p) || task_has_rt_policy(p)) {
+			p->policy = SCHED_NORMAL;
+			p->static_prio = NICE_TO_PRIO(0);
+			p->rt_priority = 0;
+		} else if (PRIO_TO_NICE(p->static_prio) < 0)
+			p->static_prio = NICE_TO_PRIO(0);
+
+		p->prio = p->normal_prio = __normal_prio(p);
+		set_load_weight(p, false);
+
+		/*
+		 * We don't need the reset flag anymore after the fork. It has
+		 * fulfilled its duty:
+		 */
+		p->sched_reset_on_fork = 0;
+	}
+
+	if (dl_prio(p->prio)) {
+		put_cpu();
+		return -EAGAIN;
+	} else if (rt_prio(p->prio)) {
+		p->sched_class = &rt_sched_class;
+	} else {
+		p->sched_class = &fair_sched_class;
+	}
+
+	init_entity_runnable_average(&p->se);
+
+	/*
+	 * The child is not yet in the pid-hash so no cgroup attach races,
+	 * and the cgroup is pinned to this child due to cgroup_fork()
+	 * is ran before sched_fork().
+	 *
+	 * Silence PROVE_RCU.
+	 */
+	raw_spin_lock_irqsave(&p->pi_lock, flags);
+	/*
+	 * We're setting the CPU for the first time, we don't migrate,
+	 * so use __set_task_cpu().
+	 */
+	__set_task_cpu(p, cpu);
+	if (p->sched_class->task_fork)
+		p->sched_class->task_fork(p);
+	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
+
+#ifdef CONFIG_SCHED_INFO
+	if (likely(sched_info_on()))
+		memset(&p->sched_info, 0, sizeof(p->sched_info));
+#endif
+#if defined(CONFIG_SMP)
+	p->on_cpu = 0;
+#endif
+	init_task_preempt_count(p);
+#ifdef CONFIG_SMP
+	plist_node_init(&p->pushable_tasks, MAX_PRIO);
+	RB_CLEAR_NODE(&p->pushable_dl_tasks);
+#endif
+
+	put_cpu();
+	return 0;
+}
+
+
+
+/*
+ * Perform scheduler related setup for a newly forked process p.
+ * p is forked by current.
+ *
+ * __sched_fork() is basic setup used by init_idle() too:
+ */
+static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
+{
+	p->on_rq			= 0;
+
+	p->se.on_rq			= 0;
+	p->se.exec_start		= 0;
+	p->se.sum_exec_runtime		= 0;
+	p->se.prev_sum_exec_runtime	= 0;
+	p->se.nr_migrations		= 0;
+	p->se.vruntime			= 0;
+	INIT_LIST_HEAD(&p->se.group_node);
+
+#ifdef CONFIG_FAIR_GROUP_SCHED
+	p->se.cfs_rq			= NULL;
+#endif
+
+#ifdef CONFIG_SCHEDSTATS
+	/* Even if schedstat is disabled, there should not be garbage */
+	memset(&p->se.statistics, 0, sizeof(p->se.statistics));
+#endif
+
+	RB_CLEAR_NODE(&p->dl.rb_node);
+	init_dl_task_timer(&p->dl);
+	init_dl_inactive_task_timer(&p->dl);
+	__dl_clear_params(p);
+
+	INIT_LIST_HEAD(&p->rt.run_list);
+	p->rt.timeout		= 0;
+	p->rt.time_slice	= sched_rr_timeslice;
+	p->rt.on_rq		= 0;
+	p->rt.on_list		= 0;
+
+#ifdef CONFIG_PREEMPT_NOTIFIERS
+	INIT_HLIST_HEAD(&p->preempt_notifiers);
+#endif
+
+	init_numa_balancing(clone_flags, p);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+static int copy_fs(unsigned long clone_flags, struct task_struct *tsk)
+{
+	struct fs_struct *fs = current->fs;
+	if (clone_flags & CLONE_FS) {
+		/* tsk->fs is already what we want */
+		spin_lock(&fs->lock);
+		if (fs->in_exec) {
+			spin_unlock(&fs->lock);
+			return -EAGAIN;
+		}
+		fs->users++;
+		spin_unlock(&fs->lock);
+		return 0;
+	}
+	tsk->fs = copy_fs_struct(fs);
+	if (!tsk->fs)
+		return -ENOMEM;
+	return 0;
+}
+
+
+// 文件分布：/fs/fs_struct.c
+struct fs_struct *copy_fs_struct(struct fs_struct *old)
+{
+	struct fs_struct *fs = kmem_cache_alloc(fs_cachep, GFP_KERNEL);
+	/* We don't need to lock fs - think why ;-) */
+	if (fs) {
+		fs->users = 1;
+		fs->in_exec = 0;
+		spin_lock_init(&fs->lock);
+		seqcount_init(&fs->seq);
+		fs->umask = old->umask;
+
+		spin_lock(&old->lock);
+		fs->root = old->root;
+		path_get(&fs->root);
+		fs->pwd = old->pwd;
+		path_get(&fs->pwd);
+		spin_unlock(&old->lock);
+	}
+	return fs;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+static int copy_mm(unsigned long clone_flags, struct task_struct *tsk)
+{
+	struct mm_struct *mm, *oldmm;
+	int retval;
+
+	tsk->min_flt = tsk->maj_flt = 0;
+	tsk->nvcsw = tsk->nivcsw = 0;
+#ifdef CONFIG_DETECT_HUNG_TASK
+	tsk->last_switch_count = tsk->nvcsw + tsk->nivcsw;
+#endif
+
+	tsk->mm = NULL;
+	tsk->active_mm = NULL;
+
+	/*
+	 * Are we cloning a kernel thread?
+	 *
+	 * We need to steal a active VM for that..
+	 */
+	oldmm = current->mm;
+	if (!oldmm)
+		return 0;
+
+	/* initialize the new vmacache entries */
+	vmacache_flush(tsk);
+
+	if (clone_flags & CLONE_VM) {
+		mmget(oldmm);
+		mm = oldmm;
+		goto good_mm;
+	}
+
+	retval = -ENOMEM;
+	mm = dup_mm(tsk);
+	if (!mm)
+		goto fail_nomem;
+
+good_mm:
+	tsk->mm = mm;
+	tsk->active_mm = mm;
+	return 0;
+
+fail_nomem:
+	return retval;
+}
+
+
+/*
+ * Allocate a new mm structure and copy contents from the
+ * mm structure of the passed in task structure.
+ */
+static struct mm_struct *dup_mm(struct task_struct *tsk)
+{
+	struct mm_struct *mm, *oldmm = current->mm;
+	int err;
+
+	mm = allocate_mm();
+	if (!mm)
+		goto fail_nomem;
+
+	memcpy(mm, oldmm, sizeof(*mm));
+
+	if (!mm_init(mm, tsk, mm->user_ns))
+		goto fail_nomem;
+
+	err = dup_mmap(mm, oldmm);
+	if (err)
+		goto free_pt;
+
+	mm->hiwater_rss = get_mm_rss(mm);
+	mm->hiwater_vm = mm->total_vm;
+
+	if (mm->binfmt && !try_module_get(mm->binfmt->module))
+		goto free_pt;
+
+	return mm;
+
+free_pt:
+	/* don't put binfmt in mmput, we haven't got module yet */
+	mm->binfmt = NULL;
+	mmput(mm);
+
+fail_nomem:
+	return NULL;
 }
