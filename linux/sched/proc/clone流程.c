@@ -795,16 +795,19 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 	 * nobody will actually run it, and a signal or other external
 	 * event cannot wake it up and insert it on the runqueue either.
 	 */
+	// 表示新建的进程
 	p->state = TASK_NEW;
 
 	/*
 	 * Make sure we do not leak PI boosting priority to the child.
 	 */
+	// 跟随当前进程的优先级
 	p->prio = current->normal_prio;
 
 	/*
 	 * Revert to default priority/policy on fork if requested.
 	 */
+	// TODO sched_reset_on_fork
 	if (unlikely(p->sched_reset_on_fork)) {
 		if (task_has_dl_policy(p) || task_has_rt_policy(p)) {
 			p->policy = SCHED_NORMAL;
@@ -823,15 +826,19 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 		p->sched_reset_on_fork = 0;
 	}
 
+	// deadline不允许分裂
 	if (dl_prio(p->prio)) {
 		put_cpu();
 		return -EAGAIN;
+	// realtime的调度类为rt_sched_class
 	} else if (rt_prio(p->prio)) {
 		p->sched_class = &rt_sched_class;
+	// 可以看出为CFS
 	} else {
 		p->sched_class = &fair_sched_class;
 	}
 
+	// 初始化调度实体负载
 	init_entity_runnable_average(&p->se);
 
 	/*
@@ -847,6 +854,7 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 	 * so use __set_task_cpu().
 	 */
 	__set_task_cpu(p, cpu);
+	// TODO task_fork
 	if (p->sched_class->task_fork)
 		p->sched_class->task_fork(p);
 	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
@@ -858,6 +866,7 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 #if defined(CONFIG_SMP)
 	p->on_cpu = 0;
 #endif
+	// TODO init_task_preempt_count
 	init_task_preempt_count(p);
 #ifdef CONFIG_SMP
 	plist_node_init(&p->pushable_tasks, MAX_PRIO);
@@ -876,6 +885,7 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
  *
  * __sched_fork() is basic setup used by init_idle() too:
  */
+// 一些最基本的初始化
 static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
 {
 	p->on_rq			= 0;
