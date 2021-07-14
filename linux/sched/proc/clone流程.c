@@ -1150,6 +1150,7 @@ void wake_up_new_task(struct task_struct *p)
 	struct rq *rq;
 
 	raw_spin_lock_irqsave(&p->pi_lock, rf.flags);
+	// 状态设为TASK_RUNNING
 	p->state = TASK_RUNNING;
 #ifdef CONFIG_SMP
 	/*
@@ -1161,15 +1162,20 @@ void wake_up_new_task(struct task_struct *p)
 	 * as we're not fully set-up yet.
 	 */
 	p->recent_used_cpu = task_cpu(p);
+	// 选择一个合适的cpu
 	__set_task_cpu(p, select_task_rq(p, task_cpu(p), SD_BALANCE_FORK, 0));
 #endif
+	// TODO
 	rq = __task_rq_lock(p, &rf);
 	update_rq_clock(rq);
 	post_init_entity_util_avg(&p->se);
 
+	// TODO
 	activate_task(rq, p, ENQUEUE_NOCLOCK);
+	// 标记p入队
 	p->on_rq = TASK_ON_RQ_QUEUED;
 	trace_sched_wakeup_new(p);
+	// 是否需要切换当前进程
 	check_preempt_curr(rq, p, WF_FORK);
 #ifdef CONFIG_SMP
 	if (p->sched_class->task_woken) {
