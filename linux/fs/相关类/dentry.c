@@ -31,6 +31,7 @@ struct dentry {
 	 * d_alias and d_rcu can share memory
 	 */
 	union {
+		// d_alias用于硬链接，一个inode对应多个dentry关系，通过.d_alias->(offset获得)struct dentry->.d_inode，哈希头在struct inode -> i_dentry
 		struct hlist_node d_alias;	/* inode alias list */
 		struct hlist_bl_node d_in_lookup_hash;	/* only for in-lookup ones */
 	 	struct rcu_head d_rcu;
