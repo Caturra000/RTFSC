@@ -67,8 +67,8 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
 
 // 1. get_empty_filp 获取file指针
 // 2. path_init 设置查找的起点，区分/和进程当前目录
-// 3. link_path_walk 解析流程
-// 4. do_last 将调用到vfs_open()
+// 3. link_path_walk 解析流程，找到父目录和路径名的最后一个分量
+// 4. do_last 决定打开还是创建，将调用到vfs_open()
 static struct file *path_openat(struct nameidata *nd,
 			const struct open_flags *op, unsigned flags)
 {
