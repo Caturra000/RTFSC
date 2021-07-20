@@ -425,6 +425,117 @@ out:
 	return error;
 }
 
+/**
+ * vfs_open - open the file at the given path
+ * @path: path to open
+ * @file: newly allocated file with f_flag initialized
+ * @cred: credentials to use
+ */
+int vfs_open(const struct path *path, struct file *file,
+	     const struct cred *cred)
+{
+	struct dentry *dentry = d_real(path->dentry, NULL, file->f_flags, 0);
+
+	if (IS_ERR(dentry))
+		return PTR_ERR(dentry);
+
+	file->f_path = *path;
+	return do_dentry_open(file, d_backing_inode(dentry), NULL, cred);
+}
+
+static int do_dentry_open(struct file *f,
+			  struct inode *inode,
+			  int (*open)(struct inode *, struct file *),
+			  const struct cred *cred)
+{
+	static const struct file_operations empty_fops = {};
+	int error;
+
+	f->f_mode = OPEN_FMODE(f->f_flags) | FMODE_LSEEK |
+				FMODE_PREAD | FMODE_PWRITE;
+
+	path_get(&f->f_path);
+	f->f_inode = inode;
+	f->f_mapping = inode->i_mapping;
+
+	/* Ensure that we skip any errors that predate opening of the file */
+	f->f_wb_err = filemap_sample_wb_err(f->f_mapping);
+
+	if (unlikely(f->f_flags & O_PATH)) {
+		f->f_mode = FMODE_PATH;
+		f->f_op = &empty_fops;
+		return 0;
+	}
+
+	if (f->f_mode & FMODE_WRITE && !special_file(inode->i_mode)) {
+		error = get_write_access(inode);
+		if (unlikely(error))
+			goto cleanup_file;
+		error = __mnt_want_write(f->f_path.mnt);
+		if (unlikely(error)) {
+			put_write_access(inode);
+			goto cleanup_file;
+		}
+		f->f_mode |= FMODE_WRITER;
+	}
+
+	/* POSIX.1-2008/SUSv4 Section XSI 2.9.7 */
+	if (S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode))
+		f->f_mode |= FMODE_ATOMIC_POS;
+
+	f->f_op = fops_get(inode->i_fop);
+	if (unlikely(WARN_ON(!f->f_op))) {
+		error = -ENODEV;
+		goto cleanup_all;
+	}
+
+	error = security_file_open(f, cred);
+	if (error)
+		goto cleanup_all;
+
+	error = break_lease(locks_inode(f), f->f_flags);
+	if (error)
+		goto cleanup_all;
+
+	// 调用不同fs的open接口
+	if (!open)
+		open = f->f_op->open;
+	if (open) {
+		error = open(inode, f);
+		if (error)
+			goto cleanup_all;
+	}
+	if ((f->f_mode & (FMODE_READ | FMODE_WRITE)) == FMODE_READ)
+		i_readcount_inc(inode);
+	if ((f->f_mode & FMODE_READ) &&
+	     likely(f->f_op->read || f->f_op->read_iter))
+		f->f_mode |= FMODE_CAN_READ;
+	if ((f->f_mode & FMODE_WRITE) &&
+	     likely(f->f_op->write || f->f_op->write_iter))
+		f->f_mode |= FMODE_CAN_WRITE;
+
+	f->f_write_hint = WRITE_LIFE_NOT_SET;
+	f->f_flags &= ~(O_CREAT | O_EXCL | O_NOCTTY | O_TRUNC);
+
+	file_ra_state_init(&f->f_ra, f->f_mapping->host->i_mapping);
+
+	return 0;
+
+cleanup_all:
+	fops_put(f->f_op);
+	if (f->f_mode & FMODE_WRITER) {
+		put_write_access(inode);
+		__mnt_drop_write(f->f_path.mnt);
+	}
+cleanup_file:
+	path_put(&f->f_path);
+	f->f_path.mnt = NULL;
+	f->f_path.dentry = NULL;
+	f->f_inode = NULL;
+	return error;
+}
+
+
 
 /// helper function #1
 static inline int build_open_flags(int flags, umode_t mode, struct open_flags *op)
