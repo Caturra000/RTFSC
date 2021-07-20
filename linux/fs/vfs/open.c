@@ -10,6 +10,12 @@ SYSCALL_DEFINE3(open, const char __user *, filename, int, flags, umode_t, mode)
 	return do_sys_open(AT_FDCWD, filename, flags, mode);
 }
 
+// 1. build_open_flags 求出open_flags
+// 2. getname 从用户空间复制文件路径到内核空间
+// 3. get_unused_fd_flags 分配fd
+// 4. do_filp_open 主流程
+// 5. fsnotify_open 事件通知
+// 6. fd_install 更新current的fd[fd]
 long do_sys_open(int dfd, const char __user *filename, int flags, umode_t mode) // dfd为AT_FDCWD
 {
 	struct open_flags op;
@@ -59,6 +65,10 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
 	return filp;
 }
 
+// 1. get_empty_filp 获取file指针
+// 2. path_init 设置查找的起点，区分/和进程当前目录
+// 3. link_path_walk 解析流程
+// 4. do_last 将调用到vfs_open()
 static struct file *path_openat(struct nameidata *nd,
 			const struct open_flags *op, unsigned flags)
 {
