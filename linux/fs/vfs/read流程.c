@@ -5,9 +5,14 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 	return ksys_read(fd, buf, count);
 }
 
+// 1. fdget
+// 2. file_pos_read 获取pos
+// 3. vfs_read
+// 4. file_pos_write 更新pos
+// 5. fdput
 ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)
 {
-	// 获取fd struct，从而得到f.file（并增加refcount）
+	// 获取fd struct，从而得到f.file（并可能增加refcount）
 	struct fd f = fdget_pos(fd);
 	ssize_t ret = -EBADF;
 
@@ -26,6 +31,7 @@ ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)
 
 
 // 一些权限的check
+// 关键流程__vfs_read
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
@@ -69,6 +75,9 @@ ssize_t __vfs_read(struct file *file, char __user *buf, size_t count,
 
 // 参考ext2，f_op->read_iter(没有f_op->read)会调用到generic_file_read_iter
 
+// 1. 初始化iov
+// 2. call_read_iter
+// 3. 更新file->f_pos(ppos)
 static ssize_t new_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos)
 {
 	// 构造用于传递数据的iov
@@ -85,6 +94,7 @@ static ssize_t new_sync_read(struct file *filp, char __user *buf, size_t len, lo
 
 	ret = call_read_iter(filp, &kiocb, &iter);
 	BUG_ON(ret == -EIOCBQUEUED);
+	// Question. 这个在ksys_read()是不是重复更新了？
 	*ppos = kiocb.ki_pos;
 	return ret;
 }
@@ -175,12 +185,26 @@ out:
  * This is really ugly. But the goto's actually try to clarify some
  * of the logic when it comes to error handling etc.
  */
+// 真正的读内容的流程在mapping->a_ops->readpage()，暂不考虑
+// 这里描述一个通用的buffered读流程
+// 虽然代码很ugly（不是我说的哈，注释写的），但思路可以看出就是
+// 1. 获取之前的read ahead信息
+// 2. find page (read page || get cached-page)
+// 3. cache this page
+// 4. check page whether up-to-date
+// 5. copy to user
+// 6. loop, goto step 1
+// 其中，read page需要mapping实际读入流程的参与
+// 不考虑error handling还是可以看得下的
 static ssize_t generic_file_buffered_read(struct kiocb *iocb,
 		struct iov_iter *iter, ssize_t written) // 一般来说，written传入为0
 {
 	struct file *filp = iocb->ki_filp;
+	// 获取address_space
 	struct address_space *mapping = filp->f_mapping;
+	// mapping归属的inode
 	struct inode *inode = mapping->host;
+	// read ahead标志
 	struct file_ra_state *ra = &filp->f_ra;
 	loff_t *ppos = &iocb->ki_pos;
 	pgoff_t index;
@@ -193,7 +217,9 @@ static ssize_t generic_file_buffered_read(struct kiocb *iocb,
 	if (unlikely(*ppos >= inode->i_sb->s_maxbytes))
 		return 0;
 	iov_iter_truncate(iter, inode->i_sb->s_maxbytes);
-
+	// 代码检索比较难找PAGE_SHIFT在特定体系下的大小，目前只考虑4K页面（大小为12）
+	// index + offset可以用于find page
+	// prev_index + prevoffset暂未看具体流程，但直觉告诉我这是已经read ahead的index + offset，那么中间做差可以获得cache
 	index = *ppos >> PAGE_SHIFT;
 	prev_index = ra->prev_pos >> PAGE_SHIFT;
 	prev_offset = ra->prev_pos & (PAGE_SIZE-1);
