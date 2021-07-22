@@ -1,6 +1,7 @@
 // 文件分布：/include/linux/mm_types.h
 
 // memory descriptor，联系task_struct与vma的关系
+// TODO per-thread VMA cache
 struct mm_struct {
 	struct {
                 // 通过vma联系到虚拟地址， 又通过pgd联系到物理地址
@@ -90,7 +91,7 @@ struct mm_struct {
 		unsigned long hiwater_rss; /* High-watermark of RSS usage */
 		unsigned long hiwater_vm;  /* High-water virtual memory usage */
 
-		unsigned long total_vm;	   /* Total pages mapped */ // 区别于map_count 进程地址空间总大小（页为单位）
+		unsigned long total_vm;	   /* Total pages mapped */ // 映射的page数量
 		unsigned long locked_vm;   /* Pages that have PG_mlocked set */
 		atomic64_t    pinned_vm;   /* Refcount permanently increased */
 		unsigned long data_vm;	   /* VM_WRITE & ~VM_SHARED & ~VM_STACK */
