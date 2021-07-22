@@ -40,6 +40,7 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 		return -EOVERFLOW;
 
 	/* Too many mappings? */
+	// 检查map限制
 	if (mm->map_count > sysctl_max_map_count)
 		return -ENOMEM;
 
@@ -204,8 +205,10 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 	/*
 	 * Can we just expand an old mapping?
 	 */
+	// trick. 合并vma
 	vma = vma_merge(mm, prev, addr, addr + len, vm_flags,
 			NULL, file, pgoff, NULL, NULL_VM_UFFD_CTX);
+	// 如果合并成功，直接out
 	if (vma)
 		goto out;
 
@@ -226,6 +229,7 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 	vma->vm_page_prot = vm_get_page_prot(vm_flags);
 	vma->vm_pgoff = pgoff;
 
+	// 如果是文件映射的形式
 	if (file) {
 		if (vm_flags & VM_DENYWRITE) {
 			error = deny_write_access(file);
@@ -263,6 +267,7 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 		/* If vm_flags changed after call_mmap(), we should try merge vma again
 		 * as we may succeed this time.
 		 */
+		// 折叠，unlikely不看
 		if (unlikely(vm_flags != vma->vm_flags && prev)) {
 			merge = vma_merge(mm, prev, vma->vm_start, vma->vm_end, vma->vm_flags,
 				NULL, vma->vm_file, vma->vm_pgoff, NULL, NULL_VM_UFFD_CTX);
@@ -281,7 +286,9 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 		}
 
 		vm_flags = vma->vm_flags;
+	// 如果共享+匿名
 	} else if (vm_flags & VM_SHARED) {
+		// 设文件映射为/dev/zero
 		error = shmem_zero_setup(vma);
 		if (error)
 			goto free_vma;
@@ -298,6 +305,7 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 			goto free_vma;
 	}
 
+	// vma放入mm的vma链表中
 	vma_link(mm, vma, prev, rb_link, rb_parent);
 	/* Once vma denies write, undo our temporary denial count */
 	if (file) {
@@ -311,6 +319,7 @@ unmap_writable:
 out:
 	perf_event_mmap(vma);
 
+	// 更新对应的mm的各种vm state
 	vm_stat_account(mm, vm_flags, len >> PAGE_SHIFT);
 	if (vm_flags & VM_LOCKED) {
 		if ((vm_flags & VM_SPECIAL) || vma_is_dax(vma) ||
@@ -358,16 +367,25 @@ unacct_error:
 }
 
 
-
+// call_mmap 表示调用 f_op->mmap
 // ext4参考实现
 
+const struct file_operations ext4_file_operations = {
+	// ...略
+	.mmap		= ext4_file_mmap,
+	// ...略
+};
+
 static const struct vm_operations_struct ext4_file_vm_ops = {
-	.fault		= ext4_filemap_fault,
-	.map_pages	= filemap_map_pages,
-	.page_mkwrite   = ext4_page_mkwrite,
+	.fault		= ext4_filemap_fault, // 处理page fault
+	.map_pages	= filemap_map_pages, // 映射文件到page cahce
+	.page_mkwrite   = ext4_page_mkwrite, // make file writable
 };
 
 // f_op具体回调
+// 简单的来说就是
+// 1. 检查dax
+// 2. 注册vma->vm_ops为ext4_file_vm_ops
 static int ext4_file_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct inode *inode = file->f_mapping->host;
