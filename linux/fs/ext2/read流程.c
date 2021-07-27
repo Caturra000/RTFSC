@@ -8,3 +8,13 @@ static ssize_t ext2_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
 	// 该流程见vfs/read
 	return generic_file_read_iter(iocb, to);
 }
+
+
+
+////////////////////////////////
+
+
+static int ext2_readpage(struct file *file, struct page *page)
+{
+	return mpage_readpage(page, ext2_get_block);
+}
