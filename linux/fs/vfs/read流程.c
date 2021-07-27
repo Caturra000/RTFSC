@@ -614,3 +614,117 @@ readit:
 
 	return ra_submit(ra, mapping, filp);
 }
+
+/*
+ * Submit IO for the read-ahead request in file_ra_state.
+ */
+static inline unsigned long ra_submit(struct file_ra_state *ra,
+		struct address_space *mapping, struct file *filp)
+{
+	return __do_page_cache_readahead(mapping, filp,
+					ra->start, ra->size, ra->async_size);
+}
+
+/*
+ * __do_page_cache_readahead() actually reads a chunk of disk.  It allocates
+ * the pages first, then submits them for I/O. This avoids the very bad
+ * behaviour which would occur if page allocations are causing VM writeback.
+ * We really don't want to intermingle reads and writes like that.
+ *
+ * Returns the number of pages requested, or the maximum amount of I/O allowed.
+ */
+unsigned int __do_page_cache_readahead(struct address_space *mapping,
+		struct file *filp, pgoff_t offset, unsigned long nr_to_read,
+		unsigned long lookahead_size)
+{
+	struct inode *inode = mapping->host;
+	struct page *page;
+	unsigned long end_index;	/* The last page we want to read */
+	LIST_HEAD(page_pool);
+	int page_idx;
+	unsigned int nr_pages = 0;
+	loff_t isize = i_size_read(inode);
+	gfp_t gfp_mask = readahead_gfp_mask(mapping);
+
+	if (isize == 0)
+		goto out;
+
+	end_index = ((isize - 1) >> PAGE_SHIFT);
+
+	/*
+	 * Preallocate as many pages as we will need.
+	 */
+	for (page_idx = 0; page_idx < nr_to_read; page_idx++) {
+		pgoff_t page_offset = offset + page_idx;
+
+		if (page_offset > end_index)
+			break;
+
+		rcu_read_lock();
+		page = radix_tree_lookup(&mapping->i_pages, page_offset);
+		rcu_read_unlock();
+		if (page && !radix_tree_exceptional_entry(page)) {
+			/*
+			 * Page already present?  Kick off the current batch of
+			 * contiguous pages before continuing with the next
+			 * batch.
+			 */
+			if (nr_pages)
+				read_pages(mapping, filp, &page_pool, nr_pages,
+						gfp_mask);
+			nr_pages = 0;
+			continue;
+		}
+
+		page = __page_cache_alloc(gfp_mask);
+		if (!page)
+			break;
+		page->index = page_offset;
+		list_add(&page->lru, &page_pool);
+		if (page_idx == nr_to_read - lookahead_size)
+			SetPageReadahead(page);
+		nr_pages++;
+	}
+
+	/*
+	 * Now start the IO.  We ignore I/O errors - if the page is not
+	 * uptodate then the caller will launch readpage again, and
+	 * will then handle the error.
+	 */
+	if (nr_pages)
+		read_pages(mapping, filp, &page_pool, nr_pages, gfp_mask);
+	BUG_ON(!list_empty(&page_pool));
+out:
+	return nr_pages;
+}
+
+static int read_pages(struct address_space *mapping, struct file *filp,
+		struct list_head *pages, unsigned int nr_pages, gfp_t gfp)
+{
+	struct blk_plug plug;
+	unsigned page_idx;
+	int ret;
+
+	blk_start_plug(&plug);
+
+	if (mapping->a_ops->readpages) {
+		ret = mapping->a_ops->readpages(filp, mapping, pages, nr_pages);
+		/* Clean up the remaining pages */
+		put_pages_list(pages);
+		goto out;
+	}
+
+	for (page_idx = 0; page_idx < nr_pages; page_idx++) {
+		struct page *page = lru_to_page(pages);
+		list_del(&page->lru);
+		if (!add_to_page_cache_lru(page, mapping, page->index, gfp))
+			mapping->a_ops->readpage(filp, page);
+		put_page(page);
+	}
+	ret = 0;
+
+out:
+	blk_finish_plug(&plug);
+
+	return ret;
+}
