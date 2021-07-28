@@ -257,6 +257,8 @@ find_page:
 		// TODO 这些大写开头的无法找到define
 		// ref: https://unix.stackexchange.com/questions/381983/where-is-pagewriteback-defined-in-the-4-9-linux-kernel-source
 		// 使用宇宙第一IDE可以解决这个问题
+		// 当前面完成了预读时，用户请求后面的一个page会打上readahead标记
+		// 因此下一次读到已经cache的page会触发该async流程
 		if (PageReadahead(page)) {
 			page_cache_async_readahead(mapping,
 					ra, filp, page,
@@ -498,6 +500,92 @@ void page_cache_sync_readahead(struct address_space *mapping,
 	ondemand_readahead(mapping, ra, filp, false, offset, req_size);
 }
 
+/**
+ * page_cache_async_readahead - file readahead for marked pages
+ * @mapping: address_space which holds the pagecache and I/O vectors
+ * @ra: file_ra_state which holds the readahead state
+ * @filp: passed on to ->readpage() and ->readpages()
+ * @page: the page at @offset which has the PG_readahead flag set
+ * @offset: start offset into @mapping, in pagecache page-sized units
+ * @req_size: hint: total size of the read which the caller is performing in
+ *            pagecache pages
+ *
+ * page_cache_async_readahead() should be called when a page is used which
+ * has the PG_readahead flag; this is a marker to suggest that the application
+ * has used up enough of the readahead window that we should start pulling in
+ * more pages.
+ */
+void
+page_cache_async_readahead(struct address_space *mapping,
+			   struct file_ra_state *ra, struct file *filp,
+			   struct page *page, pgoff_t offset,
+			   unsigned long req_size)
+{
+	/* no read-ahead */
+	if (!ra->ra_pages)
+		return;
+
+	/*
+	 * Same bit is used for PG_readahead and PG_reclaim.
+	 */
+	if (PageWriteback(page))
+		return;
+
+	ClearPageReadahead(page);
+
+	/*
+	 * Defer asynchronous read-ahead on IO congestion.
+	 */
+	if (inode_read_congested(mapping->host))
+		return;
+
+	/* do read-ahead */
+	ondemand_readahead(mapping, ra, filp, true, offset, req_size);
+}
+
+// 关于ondemand_readahead可以见/mm/readahead.c的注释说明
+// 也可以见下方链接
+// https://lwn.net/Articles/235181/
+
+/*
+ * On-demand readahead design.
+ *
+ * The fields in struct file_ra_state represent the most-recently-executed
+ * readahead attempt:
+ *
+ *                        |<----- async_size ---------|
+ *     |------------------- size -------------------->|
+ *     |==================#===========================|
+ *     ^start             ^page marked with PG_readahead
+ *
+ * To overlap application thinking time and disk I/O time, we do
+ * `readahead pipelining': Do not wait until the application consumed all
+ * readahead pages and stalled on the missing page at readahead_index;
+ * Instead, submit an asynchronous readahead I/O as soon as there are
+ * only async_size pages left in the readahead window. Normally async_size
+ * will be equal to size, for maximum pipelining.
+ *
+ * In interleaved sequential reads, concurrent streams on the same fd can
+ * be invalidating each other's readahead state. So we flag the new readahead
+ * page at (start+size-async_size) with PG_readahead, and use it as readahead
+ * indicator. The flag won't be set on already cached pages, to avoid the
+ * readahead-for-nothing fuss, saving pointless page cache lookups.
+ *
+ * prev_pos tracks the last visited byte in the _previous_ read request.
+ * It should be maintained by the caller, and will be used for detecting
+ * small random reads. Note that the readahead algorithm checks loosely
+ * for sequential patterns. Hence interleaved reads might be served as
+ * sequential ones.
+ *
+ * There is a special-case: if the first page which the application tries to
+ * read happens to be the first page of the file, it is assumed that a linear
+ * read is about to happen and the window is immediately set to the initial size
+ * based on I/O request size and the max_readahead.
+ *
+ * The code ramps up the readahead size aggressively at first, but slow down as
+ * it approaches max_readhead.
+ */
+
 /*
  * A minimal readahead algorithm for trivial sequential/random reads.
  */
@@ -522,6 +610,7 @@ ondemand_readahead(struct address_space *mapping,
 	/*
 	 * start of file
 	 */
+	// 如果是第一次读，那直接走初始化ra窗口的流程
 	if (!offset)
 		goto initial_readahead;
 
@@ -532,6 +621,8 @@ ondemand_readahead(struct address_space *mapping,
 	if ((offset == (ra->start + ra->size - ra->async_size) ||
 	     offset == (ra->start + ra->size))) {
 		ra->start += ra->size;
+		// get_next_ra_size()用于增加ra->size窗口
+		// 如果当前size大于等于max_pages/16，则按2倍增，否则按4倍增
 		ra->size = get_next_ra_size(ra, max_pages);
 		ra->async_size = ra->size;
 		goto readit;
@@ -591,7 +682,15 @@ ondemand_readahead(struct address_space *mapping,
 
 initial_readahead:
 	ra->start = offset;
+	// get_init_ra_size()大概的做法
+	// 1. 对req_size进行roundup，得到2^n的上取整，记为size
+	// 2. 如果size <= max_pages/32，返回size*4
+	// 3. 如果size <= max_pages/4，返回size*2
+	// 4. 否则返回max_pages
+	// 不管怎样，ra->size最终都大于等于req_size
 	ra->size = get_init_ra_size(req_size, max_pages);
+	// async_size前一段差值还好理解，最后一个为啥是ra->size
+	// 推测是至少要分担一定比例的size，因为返回的可能是size*4 / size*2 / max，不希望async获得一个过小的值
 	ra->async_size = ra->size > req_size ? ra->size - req_size : ra->size;
 
 readit:
@@ -601,6 +700,7 @@ readit:
 	 * the resulted next readahead window into the current one.
 	 * Take care of maximum IO pages as above.
 	 */
+	// 提前判断，加大力度
 	if (offset == ra->start && ra->size == ra->async_size) {
 		add_pages = get_next_ra_size(ra, max_pages);
 		if (ra->size + add_pages <= max_pages) {
