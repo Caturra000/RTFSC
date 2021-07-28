@@ -223,6 +223,7 @@ static ssize_t generic_file_buffered_read(struct kiocb *iocb,
 	index = *ppos >> PAGE_SHIFT;
 	prev_index = ra->prev_pos >> PAGE_SHIFT;
 	prev_offset = ra->prev_pos & (PAGE_SIZE-1);
+	// 读请求是按page算的，因此需要对*ppos + iter->count加上PAGE_SIZE-1进行向上取整
 	last_index = (*ppos + iter->count + PAGE_SIZE-1) >> PAGE_SHIFT;
 	offset = *ppos & ~PAGE_MASK;
 
@@ -233,6 +234,7 @@ static ssize_t generic_file_buffered_read(struct kiocb *iocb,
 		unsigned long nr, ret;
 
 		cond_resched();
+// 注意不管是find_page还是readpage流程都有a_ops参与，只是该流程会尽可能减少/延迟a_ops的操作
 find_page:
 		if (fatal_signal_pending(current)) {
 			error = -EINTR;
@@ -245,7 +247,8 @@ find_page:
 			if (iocb->ki_flags & IOCB_NOWAIT)
 				goto would_block;
 			// 预读
-			// 该函数只有在cache miss时才允许调用，会预读2MB大小
+			// 该函数只有在cache miss时才允许调用，一般最大会预读2MB大小
+			// 虽然函数的req_size参数设为last_index - index，企图一次性readahead全部，但内部依然会使用限制因子ra->ra_pages进行截断
 			page_cache_sync_readahead(mapping,
 					ra, filp,
 					index, last_index - index);
@@ -257,9 +260,12 @@ find_page:
 		// TODO 这些大写开头的无法找到define
 		// ref: https://unix.stackexchange.com/questions/381983/where-is-pagewriteback-defined-in-the-4-9-linux-kernel-source
 		// 使用宇宙第一IDE可以解决这个问题
+		// PS. 这里的flag是复用的，原因是page的flag占位过于珍贵，但不使用flag又不能精确判断
 		// 当前面完成了预读时，用户请求后面的一个page会打上readahead标记
 		// 因此下一次读到已经cache的page会触发该async流程
 		if (PageReadahead(page)) {
+			// Question. 代码似乎与sync_readahead流程差不多，怎么体现出async？
+			// Question. 有不少判断不适合的条件就直接return了，这样是不是没有async请求了？
 			page_cache_async_readahead(mapping,
 					ra, filp, page,
 					index, last_index - index);
@@ -528,6 +534,7 @@ page_cache_async_readahead(struct address_space *mapping,
 	/*
 	 * Same bit is used for PG_readahead and PG_reclaim.
 	 */
+	// 正在writeback？
 	if (PageWriteback(page))
 		return;
 
@@ -536,8 +543,12 @@ page_cache_async_readahead(struct address_space *mapping,
 	/*
 	 * Defer asynchronous read-ahead on IO congestion.
 	 */
+	// TODO backing device
 	if (inode_read_congested(mapping->host))
 		return;
+
+	// 推测前两个条件return是因为设备是处于占用的状态，就没法异步了
+	// 但是这样是否下一次迭代就不会再次遇到这个readahead flag的page？
 
 	/* do read-ahead */
 	ondemand_readahead(mapping, ra, filp, true, offset, req_size);
@@ -618,6 +629,7 @@ ondemand_readahead(struct address_space *mapping,
 	 * It's the expected callback offset, assume sequential access.
 	 * Ramp up sizes, and push forward the readahead window.
 	 */
+	// 针对sequential access的处理
 	if ((offset == (ra->start + ra->size - ra->async_size) ||
 	     offset == (ra->start + ra->size))) {
 		ra->start += ra->size;
@@ -634,16 +646,20 @@ ondemand_readahead(struct address_space *mapping,
 	 * Query the pagecache for async_size, which normally equals to
 	 * readahead size. Ramp it up and use it as the new readahead size.
 	 */
+	// 交织读，假装命中readahead flag
+	// 因为这个flag刚好跨越size - async size和async size，所以认为是interleaved
 	if (hit_readahead_marker) {
 		pgoff_t start;
 
 		rcu_read_lock();
+		// 从offset + 1到max_pages找出第一个没有cache的下标，从而更新请求
 		start = page_cache_next_hole(mapping, offset + 1, max_pages);
 		rcu_read_unlock();
 
 		if (!start || start - offset > max_pages)
 			return 0;
 
+		// 太绕了。。放过我吧，能不能写点注释
 		ra->start = start;
 		ra->size = start - offset;	/* old async_size */
 		ra->size += req_size;
@@ -671,6 +687,7 @@ ondemand_readahead(struct address_space *mapping,
 	 * Query the page cache and look for the traces(cached history pages)
 	 * that a sequential stream would leave behind.
 	 */
+	// TODO history pages
 	if (try_context_readahead(mapping, ra, offset, req_size, max_pages))
 		goto readit;
 
@@ -693,6 +710,7 @@ initial_readahead:
 	// 推测是至少要分担一定比例的size，因为返回的可能是size*4 / size*2 / max，不希望async获得一个过小的值
 	ra->async_size = ra->size > req_size ? ra->size - req_size : ra->size;
 
+// 提交readahead申请，附带一个合并请求的优化
 readit:
 	/*
 	 * Will this read hit the readahead marker made by itself?
@@ -712,6 +730,7 @@ readit:
 		}
 	}
 
+	// 这里真的要读了
 	return ra_submit(ra, mapping, filp);
 }
 
@@ -740,7 +759,12 @@ unsigned int __do_page_cache_readahead(struct address_space *mapping,
 	struct inode *inode = mapping->host;
 	struct page *page;
 	unsigned long end_index;	/* The last page we want to read */
+	// 大概意思是通过page_pool链表尽可能收集在一块再read
 	LIST_HEAD(page_pool);
+	// 下面流程大概扫了一眼，应该是要保证page_pool是连续的，
+	// 如果中间发现某个page存在了，那就要断开，先把当前page_pool读完，
+	// 然后清空nr_pages，再跳过当前这个page继续走下去
+
 	int page_idx;
 	unsigned int nr_pages = 0;
 	loff_t isize = i_size_read(inode);
@@ -814,6 +838,7 @@ static int read_pages(struct address_space *mapping, struct file *filp,
 		goto out;
 	}
 
+	// 这里是文件系统连多页读函数readpages都没有才会触发
 	for (page_idx = 0; page_idx < nr_pages; page_idx++) {
 		struct page *page = lru_to_page(pages);
 		list_del(&page->lru);
