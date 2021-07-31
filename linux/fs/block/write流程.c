@@ -38,7 +38,9 @@ int __block_write_begin(struct page *page, loff_t pos, unsigned len,
 int __block_write_begin_int(struct page *page, loff_t pos, unsigned len,
 		get_block_t *get_block, struct iomap *iomap)
 {
+	// 求页内offset
 	unsigned from = pos & (PAGE_SIZE - 1);
+	// 确保 <= PAGE_SIZE?
 	unsigned to = from + len;
 	struct inode *inode = page->mapping->host;
 	unsigned block_start, block_end;
@@ -56,8 +58,11 @@ int __block_write_begin_int(struct page *page, loff_t pos, unsigned len,
 	blocksize = head->b_size;
 	bbits = block_size_bits(blocksize);
 
+	// TODO
 	block = (sector_t)page->index << (PAGE_SHIFT - bbits);
 
+	// tricks. 判断的优化
+	// bh->b_this_page是一个circular list
 	for(bh = head, block_start = 0; bh != head || !block_start;
 	    block++, block_start=block_end, bh = bh->b_this_page) {
 		block_end = block_start + blocksize;
