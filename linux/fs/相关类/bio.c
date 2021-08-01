@@ -4,6 +4,7 @@
  * main unit of I/O for the block layer and lower layers (ie drivers and
  * stacking drivers)
  */
+// 通用块io请求描述符
 struct bio {
 	struct bio		*bi_next;	/* request queue link */
 	struct gendisk		*bi_disk;
@@ -63,6 +64,8 @@ struct bio {
 
 	atomic_t		__bi_cnt;	/* pin count */
 
+	// bio_vec可认为是简单的三元组向量{page, len, offset}
+	// 关键的指向vec数组的指针
 	struct bio_vec		*bi_io_vec;	/* the actual vec list */
 
 	struct bio_set		*bi_pool;
@@ -72,5 +75,6 @@ struct bio {
 	 * double allocations for a small number of bio_vecs. This member
 	 * MUST obviously be kept at the very end of the bio.
 	 */
+	// tricks.
 	struct bio_vec		bi_inline_vecs[0];
 };
