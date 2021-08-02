@@ -44,6 +44,8 @@
  *
  * This all causes the disk requests to be issued in the correct order.
  */
+// 总的来说就是尽可能构造（合并）最大的连续的bio
+// mpage在最后会保证所有按照页面顺序加入bio的page中的block是连续的
 int
 mpage_readpages(struct address_space *mapping, struct list_head *pages,
 				unsigned nr_pages, get_block_t get_block)
@@ -66,6 +68,7 @@ mpage_readpages(struct address_space *mapping, struct list_head *pages,
 					page->index,
 					gfp)) {
 			bio = do_mpage_readpage(bio, page,
+					// 假设的一种理想情况，尝试用单个bio处理掉剩下的所有pages
 					nr_pages - page_idx,
 					&last_block_in_bio, &map_bh,
 					&first_logical_block,
@@ -73,6 +76,7 @@ mpage_readpages(struct address_space *mapping, struct list_head *pages,
 		}
 		put_page(page);
 	}
+	// 按道理所有pages都处理了
 	BUG_ON(!list_empty(pages));
 	if (bio)
 		mpage_bio_submit(REQ_OP_READ, 0, bio);
@@ -149,6 +153,7 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 	 * Then do more get_blocks calls until we are done with this page.
 	 */
 	map_bh->b_page = page;
+	// 对这个page中的block处理
 	while (page_block < blocks_per_page) {
 		map_bh->b_state = 0;
 		map_bh->b_size = 0;
@@ -184,6 +189,9 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 			goto confused;		/* hole -> non-hole */
 
 		/* Contiguous blocks? */
+		// 应该是不连续？上一个blocks对不上bh预想的号
+		// TODO map_bh->b_blocknr应该是从get_block ----> map_bh ----> bno ----> Indirect.key 构造而来的（ext2流程下）
+		// 看样子是对单个block进行get_block后可以对页内直接处理（除了confused）
 		if (page_block && blocks[page_block-1] != map_bh->b_blocknr-1)
 			goto confused;
 		nblocks = map_bh->b_size >> blkbits;
@@ -220,6 +228,8 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 	/*
 	 * This page will go to BIO.  Do we need to send this BIO off first?
 	 */
+	// 发生了跨页？last_block_in_bio可以想象为。。。blocks[-1]？
+	// 此时的bio还是指代上一次的mpage结果？
 	if (bio && (*last_block_in_bio != blocks[0] - 1))
 		bio = mpage_bio_submit(REQ_OP_READ, 0, bio);
 
