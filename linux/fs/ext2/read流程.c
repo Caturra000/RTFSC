@@ -301,3 +301,78 @@ static int ext2_block_to_path(struct inode *inode,
 
 	return n;
 }
+
+
+
+
+
+
+
+/**
+ *	ext2_get_branch - read the chain of indirect blocks leading to data
+ *	@inode: inode in question
+ *	@depth: depth of the chain (1 - direct pointer, etc.)
+ *	@offsets: offsets of pointers in inode/indirect blocks
+ *	@chain: place to store the result
+ *	@err: here we store the error value
+ *
+ *	Function fills the array of triples <key, p, bh> and returns %NULL
+ *	if everything went OK or the pointer to the last filled triple
+ *	(incomplete one) otherwise. Upon the return chain[i].key contains
+ *	the number of (i+1)-th block in the chain (as it is stored in memory,
+ *	i.e. little-endian 32-bit), chain[i].p contains the address of that
+ *	number (it points into struct inode for i==0 and into the bh->b_data
+ *	for i>0) and chain[i].bh points to the buffer_head of i-th indirect
+ *	block for i>0 and NULL for i==0. In other words, it holds the block
+ *	numbers of the chain, addresses they were taken from (and where we can
+ *	verify that chain did not change) and buffer_heads hosting these
+ *	numbers.
+ *
+ *	Function stops when it stumbles upon zero pointer (absent block)
+ *		(pointer to last triple returned, *@err == 0)
+ *	or when it gets an IO error reading an indirect block
+ *		(ditto, *@err == -EIO)
+ *	or when it notices that chain had been changed while it was reading
+ *		(ditto, *@err == -EAGAIN)
+ *	or when it reads all @depth-1 indirect blocks successfully and finds
+ *	the whole chain, all way to the data (returns %NULL, *err == 0).
+ */
+static Indirect *ext2_get_branch(struct inode *inode,
+				 int depth,
+				 int *offsets,
+				 Indirect chain[4],
+				 int *err)
+{
+	struct super_block *sb = inode->i_sb;
+	Indirect *p = chain;
+	struct buffer_head *bh;
+
+	*err = 0;
+	/* i_data is not going away, no lock needed */
+	add_chain (chain, NULL, EXT2_I(inode)->i_data + *offsets);
+	if (!p->key)
+		goto no_block;
+	while (--depth) {
+		bh = sb_bread(sb, le32_to_cpu(p->key));
+		if (!bh)
+			goto failure;
+		read_lock(&EXT2_I(inode)->i_meta_lock);
+		if (!verify_chain(chain, p))
+			goto changed;
+		add_chain(++p, bh, (__le32*)bh->b_data + *++offsets);
+		read_unlock(&EXT2_I(inode)->i_meta_lock);
+		if (!p->key)
+			goto no_block;
+	}
+	return NULL;
+
+changed:
+	read_unlock(&EXT2_I(inode)->i_meta_lock);
+	brelse(bh);
+	*err = -EAGAIN;
+	goto no_block;
+failure:
+	*err = -EIO;
+no_block:
+	return p;
+}
