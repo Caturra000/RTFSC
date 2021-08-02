@@ -260,8 +260,10 @@ cleanup:
 static int ext2_block_to_path(struct inode *inode,
 			long i_block, int offsets[4], int *boundary)
 {
+	// inode->i_sb->s_blocksize / sizeof (__u32)
 	int ptrs = EXT2_ADDR_PER_BLOCK(inode->i_sb);
 	int ptrs_bits = EXT2_ADDR_PER_BLOCK_BITS(inode->i_sb);
+	// 直接块的数量，常量12
 	const long direct_blocks = EXT2_NDIR_BLOCKS,
 		indirect_blocks = ptrs,
 		double_blocks = (1 << (ptrs_bits * 2));
@@ -271,6 +273,7 @@ static int ext2_block_to_path(struct inode *inode,
 	if (i_block < 0) {
 		ext2_msg(inode->i_sb, KERN_WARNING,
 			"warning: %s: block < 0", __func__);
+	// 下面是直接 / 多级间接的返回形式
 	} else if (i_block < direct_blocks) {
 		offsets[n++] = i_block;
 		final = direct_blocks;
