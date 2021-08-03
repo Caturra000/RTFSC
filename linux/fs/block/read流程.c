@@ -101,6 +101,7 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 {
 	struct inode *inode = page->mapping->host;
 	const unsigned blkbits = inode->i_blkbits;
+	// 一个页面应该存放多少个块
 	const unsigned blocks_per_page = PAGE_SIZE >> blkbits;
 	const unsigned blocksize = 1 << blkbits;
 	sector_t block_in_file;
@@ -115,11 +116,15 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 	unsigned nblocks;
 	unsigned relative_block;
 
+	// TODO
 	if (page_has_buffers(page))
 		goto confused;
 
+	// 页中第一块的文件块号
 	block_in_file = (sector_t)page->index << (PAGE_SHIFT - blkbits);
+	// 要读的最后一页中最后一块的块号
 	last_block = block_in_file + nr_pages * blocks_per_page;
+	// 文件中的最后的块号
 	last_block_in_file = (i_size_read(inode) + blocksize - 1) >> blkbits;
 	if (last_block > last_block_in_file)
 		last_block = last_block_in_file;
@@ -128,7 +133,9 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 	/*
 	 * Map blocks using the result from the previous get_blocks call first.
 	 */
+	// 初次传入时，b_size和*first_logical_block为0
 	nblocks = map_bh->b_size >> blkbits;
+	// TODO (*first_logical_block, *first_logical_block + nblocks)
 	if (buffer_mapped(map_bh) && block_in_file > *first_logical_block &&
 			block_in_file < (*first_logical_block + nblocks)) {
 		unsigned map_offset = block_in_file - *first_logical_block;
@@ -159,12 +166,15 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 		map_bh->b_size = 0;
 
 		if (block_in_file < last_block) {
+			// 按字节算
 			map_bh->b_size = (last_block-block_in_file) << blkbits;
 			if (get_block(inode, block_in_file, map_bh, 0))
+				// 不连续？
 				goto confused;
 			*first_logical_block = block_in_file;
 		}
 
+		// TODO hole
 		if (!buffer_mapped(map_bh)) {
 			fully_mapped = 0;
 			if (first_hole == blocks_per_page)
@@ -208,6 +218,8 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 		bdev = map_bh->b_bdev;
 	}
 
+	// 至此确保页中所有的块在磁盘上是相邻的
+	// 可能最后一页不是完整的，没有映射，需要在对应page缓冲填0
 	if (first_hole != blocks_per_page) {
 		zero_user_segment(page, first_hole << blkbits, PAGE_SIZE);
 		if (first_hole == 0) {
@@ -256,6 +268,7 @@ alloc_new:
 	nblocks = map_bh->b_size >> blkbits;
 	if ((buffer_boundary(map_bh) && relative_block == nblocks) ||
 	    (first_hole != blocks_per_page))
+		// 提交bio后将返回NULL
 		bio = mpage_bio_submit(REQ_OP_READ, 0, bio);
 	else
 		*last_block_in_bio = blocks[blocks_per_page - 1];
