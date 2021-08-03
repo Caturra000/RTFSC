@@ -39,6 +39,11 @@ int ext2_get_block(struct inode *inode, sector_t iblock,
 	if (ret <= 0)
 		return ret;
 
+	// 完成映射
+	// 1. 打上map flag
+	// 2. bh_result->b_bdev =  inode->i_sb->s_bdev
+	// 3. bh_result->b_blocknr = bno
+	// 4. bh_result->b_size = inode->i_sb->s_blocksize
 	map_bh(bh_result, inode->i_sb, bno);
 	bh_result->b_size = (ret << inode->i_blkbits);
 	if (new)
