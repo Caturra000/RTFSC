@@ -793,6 +793,7 @@ unsigned int __do_page_cache_readahead(struct address_space *mapping,
 			 * contiguous pages before continuing with the next
 			 * batch.
 			 */
+			// Question. 这算是预读缓存命中问题？直观上会导致IO吞吐量的减少
 			if (nr_pages)
 				read_pages(mapping, filp, &page_pool, nr_pages,
 						gfp_mask);
