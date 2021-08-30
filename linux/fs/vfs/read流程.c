@@ -807,6 +807,7 @@ unsigned int __do_page_cache_readahead(struct address_space *mapping,
 		page->index = page_offset;
 		list_add(&page->lru, &page_pool);
 		if (page_idx == nr_to_read - lookahead_size)
+			// 从前面的流程可以看到，并不会在已缓存的页面打上readahead flag（在上面已经continue跳过了）
 			SetPageReadahead(page);
 		nr_pages++;
 	}
