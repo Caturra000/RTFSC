@@ -608,6 +608,7 @@ ondemand_readahead(struct address_space *mapping,
 		   unsigned long req_size)
 {
 	struct backing_dev_info *bdi = inode_to_bdi(mapping->host);
+	// 可以认为一般是32 PAGES
 	unsigned long max_pages = ra->ra_pages;
 	unsigned long add_pages;
 	pgoff_t prev_offset;
@@ -616,13 +617,14 @@ ondemand_readahead(struct address_space *mapping,
 	 * If the request exceeds the readahead window, allow the read to
 	 * be up to the optimal hardware IO size
 	 */
+	// io_pages是bdi的最大允许IO大小
 	if (req_size > max_pages && bdi->io_pages > max_pages)
 		max_pages = min(req_size, bdi->io_pages);
 
 	/*
 	 * start of file
 	 */
-	// 如果是第一次读，那直接走初始化ra窗口的流程
+	// 如果是第一次读/或者读首部，那直接走初始化ra窗口的流程
 	if (!offset)
 		goto initial_readahead;
 
@@ -631,11 +633,12 @@ ondemand_readahead(struct address_space *mapping,
 	 * Ramp up sizes, and push forward the readahead window.
 	 */
 	// 针对sequential access的处理
+	// 这里即使是oversize read也可能进入该条件？就是优先级上是顺序大于一切
 	if ((offset == (ra->start + ra->size - ra->async_size) ||
 	     offset == (ra->start + ra->size))) {
 		ra->start += ra->size;
 		// get_next_ra_size()用于增加ra->size窗口
-		// 如果当前size大于等于max_pages/16，则按2倍增，否则按4倍增
+		// 如果当前size大于等于max_pages/16，则按2倍增，否则按4倍增，但不超过max_pages
 		ra->size = get_next_ra_size(ra, max_pages);
 		ra->async_size = ra->size;
 		goto readit;
@@ -672,6 +675,7 @@ ondemand_readahead(struct address_space *mapping,
 	/*
 	 * oversize read
 	 */
+	// 过大读，读请求会被截断，ra->size会设为max_pages
 	if (req_size > max_pages)
 		goto initial_readahead;
 
@@ -705,10 +709,13 @@ initial_readahead:
 	// 2. 如果size <= max_pages/32，返回size*4
 	// 3. 如果size <= max_pages/4，返回size*2
 	// 4. 否则返回max_pages
-	// 不管怎样，ra->size最终都大于等于req_size
+	// <del>不管怎样，ra->size最终都大于等于req_size</del>
+	// 会逼近max_pages但不超过该阈值
+	// 这里与get_next_ra_size的增长策略共同点在于，(req_/ra)size越大，增长会越保守
 	ra->size = get_init_ra_size(req_size, max_pages);
-	// async_size前一段差值还好理解，最后一个为啥是ra->size
+	// <del>async_size前一段差值还好理解，最后一个为啥是ra->size</del>
 	// 推测是至少要分担一定比例的size，因为返回的可能是size*4 / size*2 / max，不希望async获得一个过小的值
+	// async_size总是会尽可能尝试拿到ra->size同款大小
 	ra->async_size = ra->size > req_size ? ra->size - req_size : ra->size;
 
 // 提交readahead申请，附带一个合并请求的优化
@@ -720,6 +727,8 @@ readit:
 	 * Take care of maximum IO pages as above.
 	 */
 	// 提前判断，加大力度
+	// 这个应该对异步预读无效？（offset != ra->start）
+	// 同步预读中的顺序读则基本会进入
 	if (offset == ra->start && ra->size == ra->async_size) {
 		add_pages = get_next_ra_size(ra, max_pages);
 		if (ra->size + add_pages <= max_pages) {
