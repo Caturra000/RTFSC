@@ -205,6 +205,7 @@ static ssize_t generic_file_buffered_read(struct kiocb *iocb,
 	// mapping归属的inode
 	struct inode *inode = mapping->host;
 	// read ahead标志
+	// 对于一个刚构造的ra，默认是全0，除了prev_pos为-1，ra_pages看inode
 	struct file_ra_state *ra = &filp->f_ra;
 	loff_t *ppos = &iocb->ki_pos;
 	pgoff_t index;
