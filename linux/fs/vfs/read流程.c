@@ -684,6 +684,8 @@ ondemand_readahead(struct address_space *mapping,
 	 * trivial case: (offset - prev_offset) == 1
 	 * unaligned reads: (offset - prev_offset) == 0
 	 */
+	// 这个触发就很苛刻了，我认为能进入的情况只有页面缺失时触发同步预读
+	// 不然哪来的ra->start与async边界只差1？完全重复的话会触发顺序读流程
 	prev_offset = (unsigned long long)ra->prev_pos >> PAGE_SHIFT;
 	if (offset - prev_offset <= 1UL)
 		goto initial_readahead;
