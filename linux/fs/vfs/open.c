@@ -159,6 +159,7 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 		if (err)
 			return err;
 		// 路径哈希
+		// TODO 这里的hash是怎么实现的
 		hash_len = hash_name(nd->path.dentry, name);
 
 		type = LAST_NORM;
@@ -172,6 +173,7 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 			case 1:
 				type = LAST_DOT; // .
 		}
+		// 既不是.也不是..
 		if (likely(type == LAST_NORM)) {
 			struct dentry *parent = nd->path.dentry;
 			nd->flags &= ~LOOKUP_JUMPED;
@@ -190,6 +192,8 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 		nd->last_type = type;
 
 		name += hashlen_len(hash_len);
+		// 可能是\0或者是/
+		// 如果是\0
 		if (!*name)
 			goto OK;
 		/*
@@ -199,11 +203,14 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 		do {
 			name++;
 		} while (unlikely(*name == '/'));
+		// 跳过若干///后还是\0
 		if (unlikely(!*name)) {
 OK:
 			/* pathname body, done */
+			// 一般应该是这里？
 			if (!nd->depth)
 				return 0;
+			// 目测是与symlink相关
 			name = nd->stack[nd->depth - 1].name;
 			/* trailing symlink, done */
 			if (!name)
@@ -240,6 +247,49 @@ OK:
 			return -ENOTDIR;
 		}
 	}
+}
+
+static int walk_component(struct nameidata *nd, int flags)
+{
+	struct path path;
+	struct inode *inode;
+	unsigned seq;
+	int err;
+	/*
+	 * "." and ".." are special - ".." especially so because it has
+	 * to be able to know about the current root directory and
+	 * parent relationships.
+	 */
+	if (unlikely(nd->last_type != LAST_NORM)) {
+		err = handle_dots(nd, nd->last_type);
+		if (!(flags & WALK_MORE) && nd->depth)
+			put_link(nd);
+		return err;
+	}
+	err = lookup_fast(nd, &path, &inode, &seq);
+	if (unlikely(err <= 0)) {
+		if (err < 0)
+			return err;
+		path.dentry = lookup_slow(&nd->last, nd->path.dentry,
+					  nd->flags);
+		if (IS_ERR(path.dentry))
+			return PTR_ERR(path.dentry);
+
+		path.mnt = nd->path.mnt;
+		err = follow_managed(&path, nd);
+		if (unlikely(err < 0))
+			return err;
+
+		if (unlikely(d_is_negative(path.dentry))) {
+			path_to_nameidata(&path, nd);
+			return -ENOENT;
+		}
+
+		seq = 0;	/* we are already out of RCU mode */
+		inode = d_backing_inode(path.dentry);
+	}
+
+	return step_into(nd, &path, flags, inode, seq);
 }
 
 
