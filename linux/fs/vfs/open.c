@@ -683,6 +683,7 @@ over:
 // 如果dfd为AT_FDCWD，且名字为相对路径，nd->path设为当前进程的工作目录
 // 其他情况，get_fs_pwd
 // 当前进程的根目录路径和当前目录路径都在fs_struct中
+// 简略地说是根据字符串s和flags来初始化nd的last_type / flags / depth / path / inode等参数
 static const char *path_init(struct nameidata *nd, unsigned flags)
 {
 	const char *s = nd->name->name;
@@ -690,9 +691,15 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 	if (!*s)
 		flags &= ~LOOKUP_RCU;
 
+	// 如果成功查找，类型是LAST_NORM
+	// 如果停留在上一个.，则是LAST_DOT
 	nd->last_type = LAST_ROOT; /* if there are only slashes... */
+	// 此处的flags为open_flags->lookup_flags，基本上来自于：用户open时传入的flags和build_open_flags
 	nd->flags = flags | LOOKUP_JUMPED | LOOKUP_PARENT;
 	nd->depth = 0;
+	// 在/fs/namei.c#filename_lookup中可能会flags |= LOOKUP_ROOT
+	// TODO 看下commit message，这个是干什么的（基于根目录的搜索？）
+	// 就open流程而言，似乎并没有设置，现在先忽略
 	if (flags & LOOKUP_ROOT) {
 		struct dentry *root = nd->root.dentry;
 		struct inode *inode = root->d_inode;
@@ -716,16 +723,23 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 	nd->path.dentry = NULL;
 
 	nd->m_seq = read_seqbegin(&mount_lock);
+	// 路径以'/'开头
 	if (*s == '/') {
 		if (flags & LOOKUP_RCU)
 			rcu_read_lock();
+		// 设置nd->root为current->fs->root
 		set_root(nd);
+		// 如果可以return 0，那么nd->flags会 |= LOOKUP_JUMPED，但默认本来就有
+		// 我没懂这个函数在干嘛，总之就是取nd->root处理nd->path和nd->inode（nd->root.dentry->d_inode）
 		if (likely(!nd_jump_root(nd)))
 			return s;
 		nd->root.mnt = NULL;
 		rcu_read_unlock();
 		return ERR_PTR(-ECHILD);
+	// 一般来说open时dfd是AT_FDCWD（见do_sys_open参数）
 	} else if (nd->dfd == AT_FDCWD) {
+		// path_openat传入flags时默认设置LOOKUP_RCU
+		// 根据current->fs->pwd来初始化nd->path和nd->inode
 		if (flags & LOOKUP_RCU) {
 			struct fs_struct *fs = current->fs;
 			unsigned seq;
@@ -743,6 +757,7 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 			nd->inode = nd->path.dentry->d_inode;
 		}
 		return s;
+	// 如果是openat的话一般不为AT_FDCWD
 	} else {
 		/* Caller must check execute permissions on the starting path component */
 		struct fd f = fdget_raw(nd->dfd);
