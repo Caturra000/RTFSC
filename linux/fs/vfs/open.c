@@ -1,4 +1,6 @@
 // 文件：/fs/open.c
+// NOTE: 这一部分相当不好读（主要是路径解析细节太多，以至于连主干在哪都难分清楚），
+//       建议站在巨人的肩膀上，搭配ULK等书提高方向感，需要了解细节则翻阅对应代码的git commit message
 
 SYSCALL_DEFINE3(open, const char __user *, filename, int, flags, umode_t, mode)
 {
@@ -760,7 +762,7 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 	if (!*s)
 		flags &= ~LOOKUP_RCU;
 
-	// 如果成功查找，类型是LAST_NORM
+	// 如果成功查找，类型是LAST_NORM（LAST_NORM说明最后一个分量是普通文件名）
 	// 如果停留在上一个.，则是LAST_DOT
 	nd->last_type = LAST_ROOT; /* if there are only slashes... */
 	// 此处的flags为open_flags->lookup_flags，基本上来自于：用户open时传入的flags和build_open_flags
