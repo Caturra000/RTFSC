@@ -52,6 +52,7 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
 		const struct open_flags *op)
 {
 	struct nameidata nd;
+	// 关于lookup flag见解释 ##flag #0
 	int flags = op->lookup_flags;
 	struct file *filp;
 	// 初始化nd
@@ -869,3 +870,40 @@ static void set_nameidata(struct nameidata *p, int dfd, struct filename *name)
 	p->saved = old;
 	current->nameidata = p;
 }
+
+// ##flag #0
+// 关于lookup flag，大体是pathwalk过程的状态机，描述查找的原则
+// 如果直接看kernel 4.18里的解释是基本看不懂的，因为改了一些flag但是代码注释又没更新
+// ULK里有解释，但是也有一些flag弃用了（路径名查找章节）
+// 从github找了新的版本，可能有些flag是5.x才有的，但是起码注释是全的
+//
+// 其实看这些没啥意思，4.x和5.x改动还是有点大，明白pathwalk是个复杂的过程就好
+// 比如LOOKUP_JUMPED，鬼知道要表达什么 https://github.com/torvalds/linux/commit/16c2cd7179881d5dd87779512ca5a0d657c64f62
+//
+///* pathwalk mode */
+// #define LOOKUP_FOLLOW		0x0001	/* follow links at the end */
+// #define LOOKUP_DIRECTORY	0x0002	/* require a directory */
+// #define LOOKUP_AUTOMOUNT	0x0004  /* force terminal automount */
+// #define LOOKUP_EMPTY		0x4000	/* accept empty path [user_... only] */
+// #define LOOKUP_DOWN		0x8000	/* follow mounts in the starting point */
+// #define LOOKUP_MOUNTPOINT	0x0080	/* follow mounts in the end */
+
+// #define LOOKUP_REVAL		0x0020	/* tell ->d_revalidate() to trust no cache */
+// #define LOOKUP_RCU		0x0040	/* RCU pathwalk mode; semi-internal */
+
+// /* These tell filesystem methods that we are dealing with the final component... */
+// #define LOOKUP_OPEN		0x0100	/* ... in open */
+// #define LOOKUP_CREATE		0x0200	/* ... in object creation */
+// #define LOOKUP_EXCL		0x0400	/* ... in exclusive creation */
+// #define LOOKUP_RENAME_TARGET	0x0800	/* ... in destination of rename() */
+
+// /* internal use only */
+// #define LOOKUP_PARENT		0x0010
+
+// /* Scoping flags for lookup. */
+// #define LOOKUP_NO_SYMLINKS	0x010000 /* No symlink crossing. */
+// #define LOOKUP_NO_MAGICLINKS	0x020000 /* No nd_jump_link() crossing. */
+// #define LOOKUP_NO_XDEV		0x040000 /* No mountpoint crossing. */
+// #define LOOKUP_BENEATH		0x080000 /* No escaping from starting point. */
+// #define LOOKUP_IN_ROOT		0x100000 /* Treat dirfd as fs root. */
+// #define LOOKUP_CACHED		0x200000 /* Only do cached lookup */
