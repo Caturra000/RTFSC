@@ -493,6 +493,8 @@ int vfs_open(const struct path *path, struct file *file,
 	return do_dentry_open(file, d_backing_inode(dentry), NULL, cred);
 }
 
+// 1. 调用f_op->open或者指定的open参数
+// 2. 预读初始化file_ra_state_init
 static int do_dentry_open(struct file *f,
 			  struct inode *inode,
 			  int (*open)(struct inode *, struct file *),
@@ -548,6 +550,8 @@ static int do_dentry_open(struct file *f,
 		goto cleanup_all;
 
 	// 调用不同fs的open接口
+	// 当open为NULL时会调用f_op->open
+	// 一个通用的例程为generic_file_open和一些额外工作
 	if (!open)
 		open = f->f_op->open;
 	if (open) {
@@ -583,6 +587,20 @@ cleanup_file:
 	f->f_path.dentry = NULL;
 	f->f_inode = NULL;
 	return error;
+}
+
+/*
+ * Called when an inode is about to be open.
+ * We use this to disallow opening large files on 32bit systems if
+ * the caller didn't specify O_LARGEFILE.  On 64bit systems we force
+ * on this flag in sys_open.
+ */
+int generic_file_open(struct inode * inode, struct file * filp)
+{
+	// 只是打开前的一些简单的检查
+	if (!(filp->f_flags & O_LARGEFILE) && i_size_read(inode) > MAX_NON_LFS)
+		return -EOVERFLOW;
+	return 0;
 }
 
 
