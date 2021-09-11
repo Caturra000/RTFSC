@@ -211,6 +211,8 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 OK:
 			/* pathname body, done */
 			// 一般应该是这里？
+			//（如果已经没有别的话，但如果是/blabla/你在这里/blabla？）
+			// 忘了进入的条件，上述的说法的话是不符合这个if判断的
 			if (!nd->depth)
 				return 0;
 			// 目测是与symlink相关
@@ -222,6 +224,7 @@ OK:
 			err = walk_component(nd, WALK_FOLLOW);
 		} else {
 			/* not the last component */
+			// 常规的中间状态，如/blabla/你在这里/blabla
 			err = walk_component(nd, WALK_FOLLOW | WALK_MORE);
 		}
 		if (err < 0)
@@ -244,6 +247,7 @@ OK:
 		}
 		if (unlikely(!d_can_lookup(nd->path.dentry))) {
 			if (nd->flags & LOOKUP_RCU) {
+				// TODO unlazy walk的具体含义？是取消RCU walk吗
 				if (unlazy_walk(nd))
 					return -ECHILD;
 			}
@@ -252,6 +256,11 @@ OK:
 	}
 }
 
+// 进入这个函数至少有三种可能
+// 1. 是.或者..
+// 2. 是符号链接
+// 3. 是普通文件，但处于仍在解析的状态（目录）
+// 这里优先关注中间状态（就是3），flags会加上WALK_FOLLOW | WALK_MORE
 static int walk_component(struct nameidata *nd, int flags)
 {
 	struct path path;
@@ -263,16 +272,22 @@ static int walk_component(struct nameidata *nd, int flags)
 	 * to be able to know about the current root directory and
 	 * parent relationships.
 	 */
+	// 暂不考虑这个流程，麻烦
 	if (unlikely(nd->last_type != LAST_NORM)) {
 		err = handle_dots(nd, nd->last_type);
 		if (!(flags & WALK_MORE) && nd->depth)
 			put_link(nd);
 		return err;
 	}
+	// 见 helper function #5
 	err = lookup_fast(nd, &path, &inode, &seq);
+	// 0也要进入?
+	// 从lookup_fast的结构看到，最为likely的情况是return 1
 	if (unlikely(err <= 0)) {
 		if (err < 0)
 			return err;
+		// 首先要尝试fast，有问题再slow，可认为slow就是要求具体文件系统自己lookup
+		// 会调用到inode->i_op->lookup(inode, dentry, flags)
 		path.dentry = lookup_slow(&nd->last, nd->path.dentry,
 					  nd->flags);
 		if (IS_ERR(path.dentry))
@@ -292,6 +307,9 @@ static int walk_component(struct nameidata *nd, int flags)
 		inode = d_backing_inode(path.dentry);
 	}
 
+	// 这里更多处理symbol link的事情
+	// 如果是普通过程，约等于return 0
+	// 见 helper function #6
 	return step_into(nd, &path, flags, inode, seq);
 }
 
@@ -872,6 +890,128 @@ static void set_nameidata(struct nameidata *p, int dfd, struct filename *name)
 	p->saved = old;
 	current->nameidata = p;
 }
+
+/// helper function #5
+static int lookup_fast(struct nameidata *nd,
+		       struct path *path, struct inode **inode,
+		       unsigned *seqp)
+{
+	struct vfsmount *mnt = nd->path.mnt;
+	struct dentry *dentry, *parent = nd->path.dentry;
+	int status = 1;
+	int err;
+
+	/*
+	 * Rename seqlock is not required here because in the off chance
+	 * of a false negative due to a concurrent rename, the caller is
+	 * going to fall back to non-racy lookup.
+	 */
+	if (nd->flags & LOOKUP_RCU) {
+		unsigned seq;
+		bool negative;
+		// 可认为是通过找hash得到dentry
+		dentry = __d_lookup_rcu(parent, &nd->last, &seq);
+		if (unlikely(!dentry)) {
+			// 失败的话unlazy walk
+			if (unlazy_walk(nd))
+				return -ECHILD;
+			return 0;
+		}
+
+		/*
+		 * This sequence count validates that the inode matches
+		 * the dentry name information from lookup.
+		 */
+		// 即使找到dentry了，也会用一系列read_seqcount_retry检查
+		*inode = d_backing_inode(dentry);
+		negative = d_is_negative(dentry);
+		if (unlikely(read_seqcount_retry(&dentry->d_seq, seq)))
+			return -ECHILD;
+
+		/*
+		 * This sequence count validates that the parent had no
+		 * changes while we did the lookup of the dentry above.
+		 *
+		 * The memory barrier in read_seqcount_begin of child is
+		 *  enough, we can use __read_seqcount_retry here.
+		 */
+		if (unlikely(__read_seqcount_retry(&parent->d_seq, nd->seq)))
+			return -ECHILD;
+
+		*seqp = seq;
+		status = d_revalidate(dentry, nd->flags);
+		if (likely(status > 0)) {
+			/*
+			 * Note: do negative dentry check after revalidation in
+			 * case that drops it.
+			 */
+			if (unlikely(negative))
+				return -ENOENT;
+			path->mnt = mnt;
+			path->dentry = dentry;
+			if (likely(__follow_mount_rcu(nd, path, inode, seqp)))
+				// 一般是这里？
+				return 1;
+		}
+		// 简单来说就是rcu-walk不行，try to switch to ref-walk mode
+		if (unlazy_child(nd, dentry, seq))
+			return -ECHILD;
+		if (unlikely(status == -ECHILD))
+			/* we'd been told to redo it in non-rcu mode */
+			status = d_revalidate(dentry, nd->flags);
+	} else {
+		dentry = __d_lookup(parent, &nd->last);
+		if (unlikely(!dentry))
+			return 0;
+		status = d_revalidate(dentry, nd->flags);
+	}
+	if (unlikely(status <= 0)) {
+		if (!status)
+			d_invalidate(dentry);
+		dput(dentry);
+		return status;
+	}
+	if (unlikely(d_is_negative(dentry))) {
+		dput(dentry);
+		return -ENOENT;
+	}
+
+	path->mnt = mnt;
+	path->dentry = dentry;
+	err = follow_managed(path, nd);
+	if (likely(err > 0))
+		*inode = d_backing_inode(path->dentry);
+	return err;
+}
+
+/// helper function #6
+/*
+ * Do we need to follow links? We _really_ want to be able
+ * to do this check without having to look at inode->i_op,
+ * so we keep a cache of "no, this doesn't need follow_link"
+ * for the common case.
+ */
+static inline int step_into(struct nameidata *nd, struct path *path,
+			    int flags, struct inode *inode, unsigned seq)
+{
+	if (!(flags & WALK_MORE) && nd->depth)
+		put_link(nd);
+	if (likely(!d_is_symlink(path->dentry)) ||
+	   !(flags & WALK_FOLLOW || nd->flags & LOOKUP_FOLLOW)) {
+		/* not a symlink or should not follow */
+		path_to_nameidata(path, nd);
+		nd->inode = inode;
+		nd->seq = seq;
+		return 0;
+	}
+	/* make sure that d_is_symlink above matches inode */
+	if (nd->flags & LOOKUP_RCU) {
+		if (read_seqcount_retry(&path->dentry->d_seq, seq))
+			return -ECHILD;
+	}
+	return pick_link(nd, path, inode, seq);
+}
+
 
 // ##flag #0
 // 关于lookup flag，大体是pathwalk过程的状态机，描述查找的原则
