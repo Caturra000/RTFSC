@@ -106,6 +106,8 @@ static struct file *path_openat(struct nameidata *nd,
 		return ERR_CAST(s);
 	}
 	// TODO 路径遍历逻辑
+	// link_path_walk的核心就是从字符串到dentry的转换（如nd->path.dentry）
+	// 虽然过程非常令人头大就是了
 	while (!(error = link_path_walk(s, nd)) &&
 		// do_last处理vfs_open相关
 		(error = do_last(nd, file, op, &opened)) > 0) {
@@ -373,6 +375,7 @@ static int do_last(struct nameidata *nd,
 	}
 
 	if (open_flag & (O_CREAT | O_TRUNC | O_WRONLY | O_RDWR)) {
+		// 必须要write权限
 		error = mnt_want_write(nd->path.mnt);
 		if (!error)
 			got_write = true;
@@ -386,6 +389,7 @@ static int do_last(struct nameidata *nd,
 		inode_lock(dir->d_inode);
 	else
 		inode_lock_shared(dir->d_inode);
+	// TODO
 	error = lookup_open(nd, &path, file, op, got_write, opened);
 	if (open_flag & O_CREAT)
 		inode_unlock(dir->d_inode);
@@ -399,7 +403,8 @@ static int do_last(struct nameidata *nd,
 		if ((*opened & FILE_CREATED) ||
 		    !S_ISREG(file_inode(file)->i_mode))
 			will_truncate = false;
-
+		// 内部调用__audit_inode：store the inode and device from a lookup
+		// inode通过backing_inode(file->f_path.dentry)获取
 		audit_inode(nd->name, file->f_path.dentry, 0);
 		goto opened;
 	}
@@ -419,6 +424,7 @@ static int do_last(struct nameidata *nd,
 	 * necessary...)
 	 */
 	if (got_write) {
+		// 放弃写权限
 		mnt_drop_write(nd->path.mnt);
 		got_write = false;
 	}
@@ -444,6 +450,8 @@ static int do_last(struct nameidata *nd,
 
 	seq = 0;	/* out of RCU mode, so the value doesn't matter */
 	inode = d_backing_inode(path.dentry);
+	// 下面的流程能看清主次了
+	// lookup -> open -> open_created -> opened
 finish_lookup:
 	error = step_into(nd, &path, 0, inode, seq);
 	if (unlikely(error))
@@ -556,6 +564,7 @@ static int do_dentry_open(struct file *f,
 	if (S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode))
 		f->f_mode |= FMODE_ATOMIC_POS;
 
+	// f_op的初始化
 	f->f_op = fops_get(inode->i_fop);
 	if (unlikely(WARN_ON(!f->f_op))) {
 		error = -ENODEV;
