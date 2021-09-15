@@ -4,6 +4,7 @@
  * This is the original minix inode layout on disk.
  * Note the 8-bit gid and atime and ctime.
  */
+// V3中不使用
 struct minix_inode {
 	__u16 i_mode;
 	__u16 i_uid;
