@@ -1,3 +1,124 @@
+// 文件：/fs/buffer.c
+
+/*
+ * Generic "read page" function for block devices that have the normal
+ * get_block functionality. This is most of the block device filesystems.
+ * Reads the page asynchronously --- the unlock_buffer() and
+ * set/clear_buffer_uptodate() functions propagate buffer state into the
+ * page struct once IO has completed.
+ */
+// 在minix fs中被minix_readpage直接调用
+// 也会被do_mpage_readpage流程调用（下面有代码）
+// get_block由具体文件系统提供
+int block_read_full_page(struct page *page, get_block_t *get_block)
+{
+	struct inode *inode = page->mapping->host;
+	sector_t iblock, lblock;
+	struct buffer_head *bh, *head, *arr[MAX_BUF_PER_PAGE];
+	unsigned int blocksize, bbits;
+	int nr, i;
+	int fully_mapped = 1;
+
+	head = create_page_buffers(page, inode, 0);
+	blocksize = head->b_size;
+	bbits = block_size_bits(blocksize);
+
+	iblock = (sector_t)page->index << (PAGE_SHIFT - bbits);
+	lblock = (i_size_read(inode)+blocksize-1) >> bbits;
+	bh = head;
+	nr = 0;
+	i = 0;
+
+	do {
+		if (buffer_uptodate(bh))
+			continue;
+
+		if (!buffer_mapped(bh)) {
+			int err = 0;
+
+			fully_mapped = 0;
+			if (iblock < lblock) {
+				WARN_ON(bh->b_size != blocksize);
+				err = get_block(inode, iblock, bh, 0);
+				if (err)
+					SetPageError(page);
+			}
+			if (!buffer_mapped(bh)) {
+				zero_user(page, i * blocksize, blocksize);
+				if (!err)
+					set_buffer_uptodate(bh);
+				continue;
+			}
+			/*
+			 * get_block() might have updated the buffer
+			 * synchronously
+			 */
+			if (buffer_uptodate(bh))
+				continue;
+		}
+		arr[nr++] = bh;
+	} while (i++, iblock++, (bh = bh->b_this_page) != head);
+
+	if (fully_mapped)
+		SetPageMappedToDisk(page);
+
+	if (!nr) {
+		/*
+		 * All buffers are uptodate - we can set the page uptodate
+		 * as well. But not if get_block() returned an error.
+		 */
+		if (!PageError(page))
+			SetPageUptodate(page);
+		unlock_page(page);
+		return 0;
+	}
+
+	/* Stage two: lock the buffers */
+	for (i = 0; i < nr; i++) {
+		bh = arr[i];
+		lock_buffer(bh);
+		mark_buffer_async_read(bh);
+	}
+
+	/*
+	 * Stage 3: start the IO.  Check for uptodateness
+	 * inside the buffer lock in case another process reading
+	 * the underlying blockdev brought it uptodate (the sct fix).
+	 */
+	for (i = 0; i < nr; i++) {
+		bh = arr[i];
+		if (buffer_uptodate(bh))
+			end_buffer_async_read(bh, 1);
+		else
+			submit_bh(REQ_OP_READ, 0, bh);
+	}
+	return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+////////////////////////////////////////////////////////
+
+
+
+
+
+
 // 文件：/fs/mpage.c
 
 /**
@@ -46,6 +167,7 @@
  */
 // 总的来说就是尽可能构造（合并）最大的连续的bio
 // mpage在最后会保证所有按照页面顺序加入bio的page中的block是连续的
+// 该流程被ext2_readpages直接使用，但不被ext4_readpages使用（ext4自己写了一套）
 int
 mpage_readpages(struct address_space *mapping, struct list_head *pages,
 				unsigned nr_pages, get_block_t get_block)
