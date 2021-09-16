@@ -12,6 +12,7 @@
 // get_block由具体文件系统提供
 int block_read_full_page(struct page *page, get_block_t *get_block)
 {
+	// 首先找到inode
 	struct inode *inode = page->mapping->host;
 	sector_t iblock, lblock;
 	struct buffer_head *bh, *head, *arr[MAX_BUF_PER_PAGE];
@@ -19,6 +20,7 @@ int block_read_full_page(struct page *page, get_block_t *get_block)
 	int nr, i;
 	int fully_mapped = 1;
 
+	// 创建/找到bh
 	head = create_page_buffers(page, inode, 0);
 	blocksize = head->b_size;
 	bbits = block_size_bits(blocksize);
@@ -29,6 +31,7 @@ int block_read_full_page(struct page *page, get_block_t *get_block)
 	nr = 0;
 	i = 0;
 
+	// 注意，这里continue的都是uptodate的场合
 	do {
 		if (buffer_uptodate(bh))
 			continue;
@@ -39,10 +42,12 @@ int block_read_full_page(struct page *page, get_block_t *get_block)
 			fully_mapped = 0;
 			if (iblock < lblock) {
 				WARN_ON(bh->b_size != blocksize);
+				// 既不uptodate，也不mapped，那就用iblock问具体文件系统
 				err = get_block(inode, iblock, bh, 0);
 				if (err)
 					SetPageError(page);
 			}
+			// 超过文件范围了？
 			if (!buffer_mapped(bh)) {
 				zero_user(page, i * blocksize, blocksize);
 				if (!err)
@@ -56,12 +61,16 @@ int block_read_full_page(struct page *page, get_block_t *get_block)
 			if (buffer_uptodate(bh))
 				continue;
 		}
+		// 已建立映射，但内容不够uptodate
 		arr[nr++] = bh;
+	// b_this_page是一个循环list
 	} while (i++, iblock++, (bh = bh->b_this_page) != head);
 
+	// TODO
 	if (fully_mapped)
 		SetPageMappedToDisk(page);
 
+	// 全都是uptodate
 	if (!nr) {
 		/*
 		 * All buffers are uptodate - we can set the page uptodate
@@ -87,6 +96,7 @@ int block_read_full_page(struct page *page, get_block_t *get_block)
 	 */
 	for (i = 0; i < nr; i++) {
 		bh = arr[i];
+		// 临走前再检查一遍
 		if (buffer_uptodate(bh))
 			end_buffer_async_read(bh, 1);
 		else
