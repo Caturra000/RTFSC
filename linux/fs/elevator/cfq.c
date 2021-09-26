@@ -1,0 +1,32 @@
+// 文件：/block/cfq-iosched.c
+
+static struct elevator_type iosched_cfq = {
+	.ops.sq = {
+		.elevator_merge_fn = 		cfq_merge,
+		.elevator_merged_fn =		cfq_merged_request,
+		.elevator_merge_req_fn =	cfq_merged_requests,
+		.elevator_allow_bio_merge_fn =	cfq_allow_bio_merge,
+		.elevator_allow_rq_merge_fn =	cfq_allow_rq_merge,
+		.elevator_bio_merged_fn =	cfq_bio_merged,
+		.elevator_dispatch_fn =		cfq_dispatch_requests,
+		.elevator_add_req_fn =		cfq_insert_request,
+		.elevator_activate_req_fn =	cfq_activate_request,
+		.elevator_deactivate_req_fn =	cfq_deactivate_request,
+		.elevator_completed_req_fn =	cfq_completed_request,
+		.elevator_former_req_fn =	elv_rb_former_request,
+		.elevator_latter_req_fn =	elv_rb_latter_request,
+		.elevator_init_icq_fn =		cfq_init_icq,
+		.elevator_exit_icq_fn =		cfq_exit_icq,
+		.elevator_set_req_fn =		cfq_set_request,
+		.elevator_put_req_fn =		cfq_put_request,
+		.elevator_may_queue_fn =	cfq_may_queue,
+		.elevator_init_fn =		cfq_init_queue,
+		.elevator_exit_fn =		cfq_exit_queue,
+		.elevator_registered_fn =	cfq_registered_queue,
+	},
+	.icq_size	=	sizeof(struct cfq_io_cq),
+	.icq_align	=	__alignof__(struct cfq_io_cq),
+	.elevator_attrs =	cfq_attrs,
+	.elevator_name	=	"cfq",
+	.elevator_owner =	THIS_MODULE,
+};
