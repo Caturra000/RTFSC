@@ -449,10 +449,12 @@ static int do_last(struct nameidata *nd,
 	}
 
 	seq = 0;	/* out of RCU mode, so the value doesn't matter */
+	// 通过dentry获取inode
 	inode = d_backing_inode(path.dentry);
 	// 下面的流程能看清主次了
 	// lookup -> open -> open_created -> opened
 finish_lookup:
+	// 不考虑symbol link的话，有一个关键操作是nd->inode = inode，就是inode开始关联到nd了
 	error = step_into(nd, &path, 0, inode, seq);
 	if (unlikely(error))
 		return error;
@@ -482,6 +484,7 @@ finish_open_created:
 	if (error)
 		goto out;
 	BUG_ON(*opened & FILE_OPENED); /* once it's opened, it's opened */
+	// 这里file会关联到inode，通过nd->path到d_backing_inode(dentry)和file->f_inode关联
 	error = vfs_open(&nd->path, file, current_cred());
 	if (error)
 		goto out;
@@ -601,6 +604,8 @@ static int do_dentry_open(struct file *f,
 	f->f_write_hint = WRITE_LIFE_NOT_SET;
 	f->f_flags &= ~(O_CREAT | O_EXCL | O_NOCTTY | O_TRUNC);
 
+	// 所以f->f_mapping和f->f_mapping->host->i_mapping有啥区别吗
+	// 难道file对应的address space和inode对应的address space不一样？
 	file_ra_state_init(&f->f_ra, f->f_mapping->host->i_mapping);
 
 	return 0;
