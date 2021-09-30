@@ -26,3 +26,32 @@ struct buffer_head {
 						   associated with */
 	atomic_t b_count;		/* users using this buffer_head */
 };
+
+
+// b_state可以参考以下flag说明
+enum bh_state_bits {
+	BH_Uptodate,	/* Contains valid data */
+	BH_Dirty,	/* Is dirty */
+	BH_Lock,	/* Is locked */
+	BH_Req,		/* Has been submitted for I/O */
+	BH_Uptodate_Lock,/* Used by the first bh in a page, to serialise
+			  * IO completion of other buffers in the page
+			  */
+
+	BH_Mapped,	/* Has a disk mapping */
+	BH_New,		/* Disk mapping was newly created by get_block */
+	BH_Async_Read,	/* Is under end_buffer_async_read I/O */
+	BH_Async_Write,	/* Is under end_buffer_async_write I/O */
+	BH_Delay,	/* Buffer is not yet allocated on disk */
+	BH_Boundary,	/* Block is followed by a discontiguity */
+	BH_Write_EIO,	/* I/O error on write */
+	BH_Unwritten,	/* Buffer is allocated on disk but not written */
+	BH_Quiet,	/* Buffer Error Prinks to be quiet */
+	BH_Meta,	/* Buffer contains metadata */
+	BH_Prio,	/* Buffer should be submitted with REQ_PRIO */
+	BH_Defer_Completion, /* Defer AIO completion to workqueue */
+
+	BH_PrivateStart,/* not a state bit, but the first bit available
+			 * for private allocation by other entities
+			 */
+};
