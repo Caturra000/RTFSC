@@ -197,12 +197,17 @@ mpage_readpages(struct address_space *mapping, struct list_head *pages,
 
 		prefetchw(&page->flags);
 		list_del(&page->lru);
-		// TODO
+		// 这个接口命名令人有点困惑，毕竟mapping又不是lru形式，怎么就page cache lru了
+		// 其实意思是：既插入page cache中，也插入lru中
+		// 对应的有其他接口如add_to_page_cache_locked，就是只插入page cache不插入lru（见注释部分）
+		// 查找旧的内核代码更容易看懂
 		if (!add_to_page_cache_lru(page, mapping,
 					page->index,
 					gfp)) {
 			bio = do_mpage_readpage(bio, page,
 					// 假设的一种理想情况，尝试用单个bio处理掉剩下的所有pages
+					// 可以对比一下mpage_readpage，对应的会设为1
+					// 其实就是greedy的思路，万一成功了呢
 					nr_pages - page_idx,
 					&last_block_in_bio, &map_bh,
 					&first_logical_block,
@@ -241,6 +246,7 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 	sector_t block_in_file;
 	sector_t last_block;
 	sector_t last_block_in_file;
+	// TODO 这个应该是暂存get_block得到的sector结果，但具体用途用于哪里？
 	sector_t blocks[MAX_BUF_PER_PAGE];
 	unsigned page_block;
 	unsigned first_hole = blocks_per_page;
@@ -250,7 +256,7 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 	unsigned nblocks;
 	unsigned relative_block;
 
-	// TODO
+	// 该页是在页高速缓存上？
 	if (page_has_buffers(page))
 		goto confused;
 
@@ -258,7 +264,7 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 	block_in_file = (sector_t)page->index << (PAGE_SHIFT - blkbits);
 	// 要读的最后一页中最后一块的块号
 	last_block = block_in_file + nr_pages * blocks_per_page;
-	// 文件中的最后的块号
+	// 文件中的最后的块号（向上取整）
 	last_block_in_file = (i_size_read(inode) + blocksize - 1) >> blkbits;
 	if (last_block > last_block_in_file)
 		last_block = last_block_in_file;
@@ -269,8 +275,10 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 	 */
 	// 初次传入时，b_size和*first_logical_block为0
 	nblocks = map_bh->b_size >> blkbits;
-	// TODO (*first_logical_block, *first_logical_block + nblocks)
+	// block_in_file的判断是说，位于first_logical_block和bh最后一个块之间
 	// 初次时不应该mapped
+	// 这应该是处理已经map了但是继续处理未映射部分
+	// 总之先忽略吧
 	if (buffer_mapped(map_bh) && block_in_file > *first_logical_block &&
 			block_in_file < (*first_logical_block + nblocks)) {
 		unsigned map_offset = block_in_file - *first_logical_block;
@@ -332,11 +340,13 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 		 * we just collected from get_block into the page's buffers
 		 * so readpage doesn't have to repeat the get_block call
 		 */
+		// 如果bh最新了，那就copy到page
 		if (buffer_uptodate(map_bh)) {
 			map_buffer_to_page(page, map_bh, page_block);
 			goto confused;
 		}
 	
+		// Question. 有文件空洞则无法读整页？什么情况下出现？
 		if (first_hole != blocks_per_page)
 			goto confused;		/* hole -> non-hole */
 
@@ -363,6 +373,7 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 	// 至此确保页中所有的块在磁盘上是相邻的
 	// 可能最后一页不是完整的，没有映射，需要在对应page缓冲填0
 	if (first_hole != blocks_per_page) {
+		// 由于空洞是随机数据，因此需要清0
 		zero_user_segment(page, first_hole << blkbits, PAGE_SIZE);
 		if (first_hole == 0) {
 			SetPageUptodate(page);
