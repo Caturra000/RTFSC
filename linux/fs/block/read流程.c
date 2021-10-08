@@ -179,6 +179,8 @@ int block_read_full_page(struct page *page, get_block_t *get_block)
 // mpage在最后会保证所有按照页面顺序加入bio的page中的block是连续的
 // 该流程被ext2_readpages直接使用，但不被ext4_readpages使用（ext4自己写了一套）
 // 传参部分的mapping由打开文件提供（filp->f_mapping），pages为待读页面集合，详见注释
+// 那么像ext2这种a_ops直接调用mpage_readpages又该怎么和它自己具体文件系统内的数据结构交互？
+// 实际上是通过do_mpage_readpage继续传递get_block完成，并且从这里会涉及到page->bio
 int
 mpage_readpages(struct address_space *mapping, struct list_head *pages,
 				unsigned nr_pages, get_block_t get_block)
