@@ -270,6 +270,7 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 	// 初次传入时，b_size和*first_logical_block为0
 	nblocks = map_bh->b_size >> blkbits;
 	// TODO (*first_logical_block, *first_logical_block + nblocks)
+	// 初次时不应该mapped
 	if (buffer_mapped(map_bh) && block_in_file > *first_logical_block &&
 			block_in_file < (*first_logical_block + nblocks)) {
 		unsigned map_offset = block_in_file - *first_logical_block;
@@ -296,12 +297,19 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 	map_bh->b_page = page;
 	// 对这个page中的block处理
 	while (page_block < blocks_per_page) {
+		// mapped状态也在这个b_state里
 		map_bh->b_state = 0;
 		map_bh->b_size = 0;
 
 		if (block_in_file < last_block) {
 			// 按字节算
+			// 使用get_block前需要告知b_size
 			map_bh->b_size = (last_block-block_in_file) << blkbits;
+			// block_in_file告知起始，b_size告知大小
+			// 内部实现认为此处操作没问题的话，get_block接口会干这些收尾事情
+			// 1. 执行map_bh，
+			// 2. 设置实际的b_size
+			// 3. 也会告知new / boundary等提示
 			if (get_block(inode, block_in_file, map_bh, 0))
 				// 不连续？
 				goto confused;
