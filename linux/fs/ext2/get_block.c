@@ -47,6 +47,11 @@ int ext2_get_block(struct inode *inode, sector_t iblock,
  * return = 0, if plain lookup failed.
  * return < 0, error case.
  */
+// 主要涉及分配相关的流程
+// 1. 求出并获取存储路径
+// 2. 需要分配的块的个数和物理地址
+// 3. 执行块分配
+// 也可能只是lookup，这样流程就相对简单点
 static int ext2_get_blocks(struct inode *inode,
 			   sector_t iblock, unsigned long maxblocks,
 			   u32 *bno, bool *new, bool *boundary,
@@ -66,13 +71,20 @@ static int ext2_get_blocks(struct inode *inode,
 
 	BUG_ON(maxblocks == 0);
 
-	// helper function #1
+	// 根据逻辑地址iblock求出间接块路径，存储在offset
+	// 正常获取到结果的depth取值范围是[1,4]，比如说，层数为1就是直接块
 	depth = ext2_block_to_path(inode,iblock,offsets,&blocks_to_boundary);
 
 	if (depth == 0)
 		return -EIO;
 
-	// helper function #2
+	// 解析对应的间接块信息（chain of indirect blocks）
+	// Indirect数组chain用于存储结果
+	// Indirect结构体是一个三元组<p, key, bh>，类型分别为<le32*, le32, buffer_head*>
+	// partial也是一个Indirect指针
+	// - 如果为NULL，那就是解析成功
+	// - 否则的话，就是解析不完全，返回最后一个解析的三元组
+	// Indirect具体用法见ext2_get_branch注释
 	partial = ext2_get_branch(inode, depth, offsets, chain, &err);
 	/* Simplest case - block found, no allocation needed */
 	if (!partial) {
@@ -208,7 +220,6 @@ cleanup:
 
 
 
-// helper function #1
 /**
  *	ext2_block_to_path - parse the block number into array of offsets
  *	@inode: inode in question (we are only interested in its superblock)
@@ -289,7 +300,6 @@ static int ext2_block_to_path(struct inode *inode,
 
 
 
-// helper function #2
 /**
  *	ext2_get_branch - read the chain of indirect blocks leading to data
  *	@inode: inode in question
@@ -357,4 +367,175 @@ failure:
 	*err = -EIO;
 no_block:
 	return p;
+}
+
+
+
+
+
+/**
+ *	ext2_find_goal - find a preferred place for allocation.
+ *	@inode: owner
+ *	@block:  block we want
+ *	@partial: pointer to the last triple within a chain
+ *
+ *	Returns preferred place for a block (the goal).
+ */
+
+static inline ext2_fsblk_t ext2_find_goal(struct inode *inode, long block,
+					  Indirect *partial)
+{
+	struct ext2_block_alloc_info *block_i;
+
+	block_i = EXT2_I(inode)->i_block_alloc_info;
+
+	/*
+	 * try the heuristic for sequential allocation,
+	 * failing that at least try to get decent locality.
+	 */
+	if (block_i && (block == block_i->last_alloc_logical_block + 1)
+		&& (block_i->last_alloc_physical_block != 0)) {
+		return block_i->last_alloc_physical_block + 1;
+	}
+
+	return ext2_find_near(inode, partial);
+}
+
+
+
+
+/**
+ *	ext2_blks_to_allocate: Look up the block map and count the number
+ *	of direct blocks need to be allocated for the given branch.
+ *
+ * 	@branch: chain of indirect blocks
+ *	@k: number of blocks need for indirect blocks
+ *	@blks: number of data blocks to be mapped.
+ *	@blocks_to_boundary:  the offset in the indirect block
+ *
+ *	return the total number of blocks to be allocate, including the
+ *	direct and indirect blocks.
+ */
+static int
+ext2_blks_to_allocate(Indirect * branch, int k, unsigned long blks,
+		int blocks_to_boundary)
+{
+	unsigned long count = 0;
+
+	/*
+	 * Simple case, [t,d]Indirect block(s) has not allocated yet
+	 * then it's clear blocks on that path have not allocated
+	 */
+	if (k > 0) {
+		/* right now don't hanel cross boundary allocation */
+		if (blks < blocks_to_boundary + 1)
+			count += blks;
+		else
+			count += blocks_to_boundary + 1;
+		return count;
+	}
+
+	count++;
+	while (count < blks && count <= blocks_to_boundary
+		&& le32_to_cpu(*(branch[0].p + count)) == 0) {
+		count++;
+	}
+	return count;
+}
+
+
+
+/**
+ *	ext2_alloc_branch - allocate and set up a chain of blocks.
+ *	@inode: owner
+ *	@num: depth of the chain (number of blocks to allocate)
+ *	@offsets: offsets (in the blocks) to store the pointers to next.
+ *	@branch: place to store the chain in.
+ *
+ *	This function allocates @num blocks, zeroes out all but the last one,
+ *	links them into chain and (if we are synchronous) writes them to disk.
+ *	In other words, it prepares a branch that can be spliced onto the
+ *	inode. It stores the information about that chain in the branch[], in
+ *	the same format as ext2_get_branch() would do. We are calling it after
+ *	we had read the existing part of chain and partial points to the last
+ *	triple of that (one with zero ->key). Upon the exit we have the same
+ *	picture as after the successful ext2_get_block(), except that in one
+ *	place chain is disconnected - *branch->p is still zero (we did not
+ *	set the last link), but branch->key contains the number that should
+ *	be placed into *branch->p to fill that gap.
+ *
+ *	If allocation fails we free all blocks we've allocated (and forget
+ *	their buffer_heads) and return the error value the from failed
+ *	ext2_alloc_block() (normally -ENOSPC). Otherwise we set the chain
+ *	as described above and return 0.
+ */
+
+static int ext2_alloc_branch(struct inode *inode,
+			int indirect_blks, int *blks, ext2_fsblk_t goal,
+			int *offsets, Indirect *branch)
+{
+	int blocksize = inode->i_sb->s_blocksize;
+	int i, n = 0;
+	int err = 0;
+	struct buffer_head *bh;
+	int num;
+	ext2_fsblk_t new_blocks[4];
+	ext2_fsblk_t current_block;
+
+	num = ext2_alloc_blocks(inode, goal, indirect_blks,
+				*blks, new_blocks, &err);
+	if (err)
+		return err;
+
+	branch[0].key = cpu_to_le32(new_blocks[0]);
+	/*
+	 * metadata blocks and data blocks are allocated.
+	 */
+	for (n = 1; n <= indirect_blks;  n++) {
+		/*
+		 * Get buffer_head for parent block, zero it out
+		 * and set the pointer to new one, then send
+		 * parent to disk.
+		 */
+		bh = sb_getblk(inode->i_sb, new_blocks[n-1]);
+		if (unlikely(!bh)) {
+			err = -ENOMEM;
+			goto failed;
+		}
+		branch[n].bh = bh;
+		lock_buffer(bh);
+		memset(bh->b_data, 0, blocksize);
+		branch[n].p = (__le32 *) bh->b_data + offsets[n];
+		branch[n].key = cpu_to_le32(new_blocks[n]);
+		*branch[n].p = branch[n].key;
+		if ( n == indirect_blks) {
+			current_block = new_blocks[n];
+			/*
+			 * End of chain, update the last new metablock of
+			 * the chain to point to the new allocated
+			 * data blocks numbers
+			 */
+			for (i=1; i < num; i++)
+				*(branch[n].p + i) = cpu_to_le32(++current_block);
+		}
+		set_buffer_uptodate(bh);
+		unlock_buffer(bh);
+		mark_buffer_dirty_inode(bh, inode);
+		/* We used to sync bh here if IS_SYNC(inode).
+		 * But we now rely upon generic_write_sync()
+		 * and b_inode_buffers.  But not for directories.
+		 */
+		if (S_ISDIR(inode->i_mode) && IS_DIRSYNC(inode))
+			sync_dirty_buffer(bh);
+	}
+	*blks = num;
+	return err;
+
+failed:
+	for (i = 1; i < n; i++)
+		bforget(branch[i].bh);
+	for (i = 0; i < indirect_blks; i++)
+		ext2_free_blocks(inode, new_blocks[i], 1);
+	ext2_free_blocks(inode, new_blocks[i], num);
+	return err;
 }
