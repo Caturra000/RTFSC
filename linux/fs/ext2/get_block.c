@@ -78,9 +78,11 @@ static int ext2_get_blocks(struct inode *inode,
 	if (depth == 0)
 		return -EIO;
 
-	// 解析对应的间接块信息（chain of indirect blocks）
+	// 解析对应的间接块信息（chain of indirect blocks），填充chain
 	// Indirect数组chain用于存储结果
 	// Indirect结构体是一个三元组<p, key, bh>，类型分别为<le32*, le32, buffer_head*>
+	// - p为block地址，key为值，至于为什么要分开为两个成员而不是通过*p来得到值，可以看verify_chain()的用法
+	// - bh就是这个block所在的buffer_head
 	// partial也是一个Indirect指针
 	// - 如果为NULL，那就是解析成功
 	// - 否则的话，就是解析不完全，返回最后一个解析的三元组
@@ -155,6 +157,7 @@ static int ext2_get_blocks(struct inode *inode,
 	if (S_ISREG(inode->i_mode) && (!ei->i_block_alloc_info))
 		ext2_init_block_alloc_info(inode);
 
+	// 找一个适合分配的地方
 	goal = ext2_find_goal(inode, iblock, partial);
 
 	/* the number of blocks need to allocate for [d,t]indirect blocks */
@@ -163,6 +166,7 @@ static int ext2_get_blocks(struct inode *inode,
 	 * Next look up the indirect map to count the totoal number of
 	 * direct blocks to allocate for this branch.
 	 */
+	// 求需要分配的block个数
 	count = ext2_blks_to_allocate(partial, indirect_blks,
 					maxblocks, blocks_to_boundary);
 	/*
@@ -341,9 +345,15 @@ static Indirect *ext2_get_branch(struct inode *inode,
 
 	*err = 0;
 	/* i_data is not going away, no lock needed */
+	// add_chain的执行过程，简单对chain填充
+	// （这里bh为NULL, v为EXT2_I(inode)->i_data + *offsets）
+	// chain->p = v
+	// chain->key = *chain->p
+	// chain->bh = bh
 	add_chain (chain, NULL, EXT2_I(inode)->i_data + *offsets);
 	if (!p->key)
 		goto no_block;
+	// 就是不断地填满p（或者叫partial）
 	while (--depth) {
 		bh = sb_bread(sb, le32_to_cpu(p->key));
 		if (!bh)
