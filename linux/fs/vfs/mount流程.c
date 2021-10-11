@@ -13,6 +13,9 @@
  * Therefore, if this magic number is present, it carries no information
  * and must be discarded.
  */
+// 1. 解析dir_name，处理为path
+// 2. 解析flags
+// 3. 最普通的情况是调用do_new_mount
 long do_mount(const char *dev_name, const char __user *dir_name,
 		const char *type_page, unsigned long flags, void *data_page)
 {
@@ -113,10 +116,16 @@ static int do_new_mount(struct path *path, const char *fstype, int sb_flags,
 	if (!fstype)
 		return -EINVAL;
 
+	// 根据char*得到一个file_system_type*
+	// 它是已注册的内存结构
+	// 回调用到的mount从type得到
 	type = get_fs_type(fstype);
 	if (!type)
 		return -ENODEV;
 
+	// 通过回调得到vfsmount
+	// vfsmount可认为是<dentry*, super_block*, flags>三元组
+	// 也就是说我们的目标就是要拿到这三个东西
 	mnt = vfs_kern_mount(type, sb_flags, name, data);
 	if (!IS_ERR(mnt) && (type->fs_flags & FS_HAS_SUBTYPE) &&
 	    !mnt->mnt_sb->s_subtype)
@@ -131,6 +140,7 @@ static int do_new_mount(struct path *path, const char *fstype, int sb_flags,
 		return -EPERM;
 	}
 
+	// 新的vfsmount插入到全局目录树
 	err = do_add_mount(real_mount(mnt), path, mnt_flags);
 	if (err)
 		mntput(mnt);
@@ -146,13 +156,19 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void 
 	if (!type)
 		return ERR_PTR(-ENODEV);
 
+	// 从kmem构造struct mount实例的过程，略
 	mnt = alloc_vfsmnt(name);
 	if (!mnt)
 		return ERR_PTR(-ENOMEM);
 
 	if (flags & SB_KERNMOUNT)
+		// mnt->mnt是一个vfsmount
+		// 上面的alloc_vfsmnt其实没有对mnt->mnt做任何事情
 		mnt->mnt.mnt_flags = MNT_INTERNAL;
 
+	// 得到mnt->mnt.mnt_root了
+	// 并且从root实例还能得到super_block
+	// 其实mount_fs是一个简单封装，得到root的具体过程还是得靠type->mount
 	root = mount_fs(type, flags, name, data);
 	if (IS_ERR(root)) {
 		mnt_free_id(mnt);
@@ -231,7 +247,9 @@ out:
 	return ERR_PTR(error);
 }
 
+// 块设备挂载用的通用函数
 // 一般来说，type->mount是调用mount_bdev()，内部会回调具体文件系统的fill_super()
+// 除了fill_super流程，再往下就跟各种bdev打交道了
 struct dentry *mount_bdev(struct file_system_type *fs_type,
 	int flags, const char *dev_name, void *data,
 	int (*fill_super)(struct super_block *, void *, int))
@@ -306,9 +324,9 @@ error:
 	return ERR_PTR(error);
 }
 
-// 再往下就跟各种bedv打交道了
 
-
+// 一个参考回调实现
+// TODO 移动至fs/minix
 static int minix_fill_super(struct super_block *s, void *data, int silent)
 {
 	struct buffer_head *bh;
