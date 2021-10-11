@@ -14,6 +14,7 @@
  *  not to prevent page migration if you set gfp to zero.
  *  It returns NULL if the block was unreadable.
  */
+// 接口，读入bdev里面的块，返回映射其数据的buffer head
 struct buffer_head *
 __bread_gfp(struct block_device *bdev, sector_t block,
 		   unsigned size, gfp_t gfp)
@@ -23,6 +24,7 @@ __bread_gfp(struct block_device *bdev, sector_t block,
 
 	if (likely(bh) && !buffer_uptodate(bh))
 		// ##flag #1
+		// 简单来说就是发出request
 		bh = __bread_slow(bh);
 	return bh;
 }
@@ -36,11 +38,13 @@ __bread_gfp(struct block_device *bdev, sector_t block,
  * try_to_free_buffers() attempt is failing.  FIXME, perhaps?
  */
 // ##flag #0
+// 从注释来看，这个函数会尝试找到/创建对应设备的（多个）块的buffer head
 struct buffer_head *
 __getblk_gfp(struct block_device *bdev, sector_t block,
 	     unsigned size, gfp_t gfp)
 {
 	// ##flag #2
+	// 尝试往LRU / page cache里找，找不到就返回NULL
 	struct buffer_head *bh = __find_get_block(bdev, block, size);
 
 	might_sleep();
@@ -56,18 +60,26 @@ __getblk_gfp(struct block_device *bdev, sector_t block,
  * NULL
  */
 // ##flag #2
+// 往缓存里找，这里额外添加了一层LRU
+// 找不到就是返回NULL
 struct buffer_head *
 __find_get_block(struct block_device *bdev, sector_t block, unsigned size)
 {
+	// 在this cpu lru里查找
+	// 可能位于bh_lrus.bhs
+	// 内部基本就是并发接口的使用了
 	struct buffer_head *bh = lookup_bh_lru(bdev, block, size);
 
 	if (bh == NULL) {
 		/* __find_get_block_slow will mark the page accessed */
 		// ##flag #4
+		// 在page cache（既address_space）里找
 		bh = __find_get_block_slow(bdev, block);
 		if (bh)
+			// 找到了就插入到lru
 			bh_lru_install(bh);
 	} else
+		// 意义不太明白，总之对bh->b_page进行mark page accessed操作
 		touch_buffer(bh);
 
 	return bh;
@@ -85,6 +97,8 @@ __find_get_block(struct block_device *bdev, sector_t block, unsigned size)
  */
 static struct buffer_head *
 // ##flag #4
+// 虽然说是slow，但起码也是从page cache里查找bh
+// 如果没找到，那就是返回NULL
 __find_get_block_slow(struct block_device *bdev, sector_t block)
 {
 	struct inode *bd_inode = bdev->bd_inode;
@@ -96,7 +110,9 @@ __find_get_block_slow(struct block_device *bdev, sector_t block)
 	struct page *page;
 	int all_mapped = 1;
 
+	// block对应的page index
 	index = block >> (PAGE_SHIFT - bd_inode->i_blkbits);
+	// 往mapping里掏出page
 	page = find_get_page_flags(bd_mapping, index, FGP_ACCESSED);
 	if (!page)
 		goto out;
@@ -104,11 +120,14 @@ __find_get_block_slow(struct block_device *bdev, sector_t block)
 	spin_lock(&bd_mapping->private_lock);
 	if (!page_has_buffers(page))
 		goto out_unlock;
+	// TODO 这种形式的page与bh的关联是从哪里构造得到的？
 	head = page_buffers(page);
 	bh = head;
+	// 双向循环链表形式遍历
 	do {
 		if (!buffer_mapped(bh))
 			all_mapped = 0;
+		// 找到对应的block了？
 		else if (bh->b_blocknr == block) {
 			ret = bh;
 			get_bh(bh);
@@ -138,6 +157,8 @@ out_unlock:
 out:
 	return ret;
 }
+
+// 关键流程到此为止，下面的为分支函数
 
 
 static struct buffer_head *
