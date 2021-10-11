@@ -250,6 +250,7 @@ out:
 // 块设备挂载用的通用函数
 // 一般来说，type->mount是调用mount_bdev()，内部会回调具体文件系统的fill_super()
 // 除了fill_super流程，再往下就跟各种bdev打交道了
+// 除了fill_super，其它的辅助用函数不再跟踪
 struct dentry *mount_bdev(struct file_system_type *fs_type,
 	int flags, const char *dev_name, void *data,
 	int (*fill_super)(struct super_block *, void *, int))
@@ -262,6 +263,9 @@ struct dentry *mount_bdev(struct file_system_type *fs_type,
 	if (!(flags & SB_RDONLY))
 		mode |= FMODE_WRITE;
 
+	// 通过dev_name(/dev/xx)得到block_device
+	// 1. 路径查找，调用kern_path()得到path
+	// 2. path.dentry->d_inode作为参数，调用bd_acquire得到block_device
 	bdev = blkdev_get_by_path(dev_name, mode, fs_type);
 	if (IS_ERR(bdev))
 		return ERR_CAST(bdev);
@@ -277,6 +281,11 @@ struct dentry *mount_bdev(struct file_system_type *fs_type,
 		error = -EBUSY;
 		goto error_bdev;
 	}
+	// 通过test和set回调得到super_block：
+	// fs_type->fs_supers链表中查找（可能）已存在的对应super_block
+	// - 比较设备是否相同用test_bdev_super，以super_block->s_bdev和sget的bdev参数做比较
+	// 没找到的情况下会创建，调用set_bdev_super
+	// - 创建过程中新的sb会插入到super_blocks等链表
 	s = sget(fs_type, test_bdev_super, set_bdev_super, flags | SB_NOSEC,
 		 bdev);
 	mutex_unlock(&bdev->bd_fsfreeze_mutex);
