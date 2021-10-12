@@ -25,20 +25,24 @@ static int get_block(struct inode * inode, sector_t block,
 	Indirect chain[DEPTH];
 	Indirect *partial;
 	int left;
+	// 根据block号求出各层offset
 	int depth = block_to_path(inode, block, offsets);
 
 	if (depth == 0)
 		goto out;
 
 reread:
+	// 从offset得到映射信息，存储于chain
 	partial = get_branch(inode, depth, offsets, chain, &err);
 
 	/* Simplest case - block found, no allocation needed */
 	if (!partial) {
 got_it:
+		// 完成映射bdev / blocknr / size
 		map_bh(bh, inode->i_sb, block_to_cpu(chain[depth-1].key));
 		/* Clean up and exit */
 		partial = chain+depth-1; /* the whole chain */
+		// 流程就这么结束了，get_block也没有对bh->b_data干什么事情，只是想拿到最终的blocknr
 		goto cleanup;
 	}
 
@@ -62,10 +66,12 @@ out:
 		goto changed;
 
 	left = (chain + depth) - partial;
+	// 补全断链，需要补的数目为left
 	err = alloc_branch(inode, left, offsets+(partial-chain), partial);
 	if (err)
 		goto cleanup;
 
+	// 将已存在的和刚补上的连接起来
 	if (splice_branch(inode, chain, partial, left) < 0)
 		goto changed;
 
@@ -129,6 +135,7 @@ static inline Indirect *get_branch(struct inode *inode,
 	if (!p->key)
 		goto no_block;
 	while (--depth) {
+		// 读入内容到bh
 		bh = sb_bread(sb, block_to_cpu(p->key));
 		if (!bh)
 			goto failure;
