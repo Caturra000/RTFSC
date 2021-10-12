@@ -121,6 +121,15 @@ __find_get_block_slow(struct block_device *bdev, sector_t block)
 	if (!page_has_buffers(page))
 		goto out_unlock;
 	// TODO 这种形式的page与bh的关联是从哪里构造得到的？
+	// 可以见alloc_page_buffers(page, size, ...)
+	// 1. page为通过mapping找到对应index的page
+	// 2. size为每个buffer的大小
+	// 3. 那么会构造⌊PAGE_SIZE / size⌋个buffer
+	// 4. bh都是alloc_buffer_head()得到，然后通过b_this_page形成bh双向链表
+	// 5. 最后通过set_bh_page(bh, page, offset)实现bh到page的单向关联
+	// 至于page到bh的关联可以先看attach_page_buffers
+	// （翻buffer_head.h找到的，还没跟踪被哪些调用，至少在block_read_full_page是有用到的）
+	// - attach_page_buffers就是简单的把page->private指向一个bh
 	head = page_buffers(page);
 	bh = head;
 	// 双向循环链表形式遍历
