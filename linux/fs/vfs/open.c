@@ -360,8 +360,11 @@ static int do_last(struct nameidata *nd,
 	nd->flags |= op->intent;
 
 	// CASE 1: nd->last_type必然为LAST_ROOT，满足
+	// CASE 2: nd->last_type为LAST_DOT，满足
 	if (nd->last_type != LAST_NORM) {
-		// CASE 1: 直接返回0
+		// CASE 1:
+		// CASE 2:
+		// 直接返回0（只处理DOTDOT）
 		error = handle_dots(nd, nd->last_type);
 		if (unlikely(error))
 			return error;
@@ -489,7 +492,9 @@ finish_open:
 	if (error)
 		return error;
 
-	// CASE 1: 其实下面流程已经没啥事情了，相当于返回0
+	// CASE 1:
+	// CASE 2:
+	// 其实下面流程已经没啥事情了，就调用一下vfs_open（并没有什么重要事情），然后返回0
 
 	audit_inode(nd->name, nd->path.dentry, 0);
 	error = -EISDIR;
