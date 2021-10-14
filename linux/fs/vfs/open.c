@@ -244,6 +244,7 @@ OK:
 				return 0;
 			/* last component of nested symlink */
 			err = walk_component(nd, WALK_FOLLOW);
+			// CASE 3: 别忘了出来后还是走for(;;)循环，直到解析完最后分量（找到最终的dentry）
 		} else {
 			/* not the last component */
 			// 常规的中间状态，如/blabla/你在这里/blabla
@@ -279,10 +280,11 @@ OK:
 }
 
 // 进入这个函数至少有三种可能
-// 1. 是.或者..
+// <del>1. 是.或者..</del>（存疑）
 // 2. 是符号链接
 // 3. 是普通文件，但处于仍在解析的状态（目录）
 // 这里优先关注中间状态（就是3），flags会加上WALK_FOLLOW | WALK_MORE
+// 简单来说是尝试快速lookup（哈希往dcache找），不行再尝试具体文件系统的inode->i_op->lookup（slow lookup）
 static int walk_component(struct nameidata *nd, int flags)
 {
 	struct path path;
