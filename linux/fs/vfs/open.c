@@ -1,4 +1,5 @@
 // 文件：/fs/open.c
+// 参考：https://www.kernel.org/doc/html/latest/filesystems/path-lookup.html
 // NOTE: 这一部分相当不好读（主要是路径解析细节太多，以至于连主干在哪都难分清楚），
 //       建议站在巨人的肩膀上，搭配ULK等书提高方向感，需要了解细节则翻阅对应代码的git commit message
 
@@ -20,6 +21,7 @@ SYSCALL_DEFINE3(open, const char __user *, filename, int, flags, umode_t, mode)
 // 6. fd_install 更新current的fd[fd]
 long do_sys_open(int dfd, const char __user *filename, int flags, umode_t mode) // dfd为AT_FDCWD
 {
+	// 处理流程的状态机变量
 	struct open_flags op;
 	// 根据文件打开标志和文件访问标志求出open_flag
 	int fd = build_open_flags(flags, mode, &op); /// helper function #1
@@ -55,10 +57,13 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
 {
 	struct nameidata nd;
 	// 关于lookup flag见解释 ##flag #0
+	// 可能有LOOKUP_FOLLOW
 	int flags = op->lookup_flags;
 	struct file *filp;
 	// 初始化nd
+	// TODO 有些成员的用途不太明确
 	set_nameidata(&nd, dfd, pathname); /// helper function #4
+	// LOOKUP_RCU：启用rcu-walk
 	filp = path_openat(&nd, op, flags | LOOKUP_RCU);
 	if (unlikely(filp == ERR_PTR(-ECHILD)))
 		filp = path_openat(&nd, op, flags);
@@ -701,9 +706,11 @@ static inline int build_open_flags(int flags, umode_t mode, struct open_flags *o
 
 	op->acc_mode = acc_mode;
 
+	// 关注的LOOKUP1
 	op->intent = flags & O_PATH ? 0 : LOOKUP_OPEN;
 
 	if (flags & O_CREAT) {
+		// 关注的LOOKUP2
 		op->intent |= LOOKUP_CREATE;
 		if (flags & O_EXCL)
 			op->intent |= LOOKUP_EXCL;
@@ -712,8 +719,13 @@ static inline int build_open_flags(int flags, umode_t mode, struct open_flags *o
 	if (flags & O_DIRECTORY)
 		lookup_flags |= LOOKUP_DIRECTORY;
 	if (!(flags & O_NOFOLLOW))
+		// 关注的LOOKUP3
 		lookup_flags |= LOOKUP_FOLLOW;
 	op->lookup_flags = lookup_flags;
+	// 一般情况的话
+	// intent应该有LOOKUP_OPEN，有可能搭上LOOKUP_CREATE
+	// lookup_flags有LOOKUP_FOLLOW
+	// open_flag基本跟用户传进来的差不多，略有改动
 	return 0;
 }
 
@@ -787,10 +799,12 @@ over:
 // 其他情况，get_fs_pwd
 // 当前进程的根目录路径和当前目录路径都在fs_struct中
 // 简略地说是根据字符串s和flags来初始化nd的last_type / flags / depth / path / inode等参数
+// flags：目前认为有 LOOKUP_RCU | LOOKUP_FOLLOW
 static const char *path_init(struct nameidata *nd, unsigned flags)
 {
 	const char *s = nd->name->name;
 
+	// 什么情况下会没有路径名？
 	if (!*s)
 		flags &= ~LOOKUP_RCU;
 
@@ -798,6 +812,7 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 	// 如果停留在上一个.，则是LAST_DOT
 	nd->last_type = LAST_ROOT; /* if there are only slashes... */
 	// 此处的flags为open_flags->lookup_flags，基本上来自于：用户open时传入的flags和build_open_flags
+	// nd->flags认为是 LOOKUP_RCU | LOOKUP_FOLLOW | LOOKUP_JUMPED | LOOKUP_PARENT
 	nd->flags = flags | LOOKUP_JUMPED | LOOKUP_PARENT;
 	nd->depth = 0;
 	// 在/fs/namei.c#filename_lookup中可能会flags |= LOOKUP_ROOT
@@ -832,8 +847,9 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 			rcu_read_lock();
 		// 设置nd->root为current->fs->root
 		set_root(nd);
-		// 如果可以return 0，那么nd->flags会 |= LOOKUP_JUMPED，但默认本来就有
-		// 我没懂这个函数在干嘛，总之就是取nd->root处理nd->path和nd->inode（nd->root.dentry->d_inode）
+		// 填充nd->path和nd->inode，因为刚开始来，所以就是刚才set_root()带来的current->fs->root相关的信息
+		// 并且打上LOOKUP_JUMPED标记（默认本来就有）
+		// '/'开头的流程就到这里了
 		if (likely(!nd_jump_root(nd)))
 			return s;
 		nd->root.mnt = NULL;
@@ -894,6 +910,8 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 
 /// helper function #4
 
+// TODO
+// 填充形参p和更新current->nameidata
 static void set_nameidata(struct nameidata *p, int dfd, struct filename *name)
 {
 	struct nameidata *old = current->nameidata;
