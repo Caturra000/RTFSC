@@ -3,6 +3,14 @@
 // NOTE: 这一部分相当不好读（主要是路径解析细节太多，以至于连主干在哪都难分清楚），
 //       建议站在巨人的肩膀上，搭配ULK等书提高方向感，需要了解细节则翻阅对应代码的git commit message
 
+// test cases:
+// 1. /
+// 2. .
+// 3. /abc/def/ghi
+// 4. abc/def/ghi
+// 5. ../abc/./def
+// test case 3 / 4 / 5还区分是否create
+
 SYSCALL_DEFINE3(open, const char __user *, filename, int, flags, umode_t, mode)
 {
 	if (force_o_largefile()) // BITS_PER_LONG != 32
@@ -113,6 +121,7 @@ static struct file *path_openat(struct nameidata *nd,
 	// TODO 路径遍历逻辑
 	// link_path_walk的核心就是从字符串到dentry的转换（如nd->path.dentry）
 	// 虽然过程非常令人头大就是了
+	// CASE 1: link_path_walk基本不会处理任何事情就返回0
 	while (!(error = link_path_walk(s, nd)) &&
 		// do_last处理vfs_open相关
 		(error = do_last(nd, file, op, &opened)) > 0) {
@@ -157,6 +166,7 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 	// 多个'/'视为1个
 	while (*name=='/')
 		name++;
+	// CASE 1: 将结束于此
 	if (!*name)
 		return 0;
 
@@ -329,6 +339,7 @@ static int do_last(struct nameidata *nd,
 		   struct file *file, const struct open_flags *op,
 		   int *opened)
 {
+	// CASE 1: dir就是root
 	struct dentry *dir = nd->path.dentry;
 	int open_flag = op->open_flag;
 	bool will_truncate = (open_flag & O_TRUNC) != 0;
@@ -339,10 +350,13 @@ static int do_last(struct nameidata *nd,
 	struct path path;
 	int error;
 
+	// CASE 1: flags = LOOKUP_RCU | LOOKUP_FOLLOW | LOOKUP_JUMPED | LOOKUP_OPEN <| LOOKUP_CREATE>
 	nd->flags &= ~LOOKUP_PARENT;
 	nd->flags |= op->intent;
 
+	// CASE 1: nd->last_type必然为LAST_ROOT，满足
 	if (nd->last_type != LAST_NORM) {
+		// CASE 1: 直接返回0
 		error = handle_dots(nd, nd->last_type);
 		if (unlikely(error))
 			return error;
@@ -465,9 +479,13 @@ finish_lookup:
 		return error;
 finish_open:
 	/* Why this, you ask?  _Now_ we might have grown LOOKUP_JUMPED... */
+	// CASE 1: nd->root.mnt = NULL，返回0
 	error = complete_walk(nd);
 	if (error)
 		return error;
+
+	// CASE 1: 其实下面流程已经没啥事情了，相当于返回0
+
 	audit_inode(nd->name, nd->path.dentry, 0);
 	error = -EISDIR;
 	if ((open_flag & O_CREAT) && d_is_dir(nd->path.dentry))
@@ -810,6 +828,9 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 
 	// 如果成功查找，类型是LAST_NORM（LAST_NORM说明最后一个分量是普通文件名）
 	// 如果停留在上一个.，则是LAST_DOT
+	// CASE 1:
+	// CASE 3:
+	// 直到该流程结束只能是LAST_ROOT
 	nd->last_type = LAST_ROOT; /* if there are only slashes... */
 	// 此处的flags为open_flags->lookup_flags，基本上来自于：用户open时传入的flags和build_open_flags
 	// nd->flags认为是 LOOKUP_RCU | LOOKUP_FOLLOW | LOOKUP_JUMPED | LOOKUP_PARENT
@@ -842,6 +863,8 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 
 	nd->m_seq = read_seqbegin(&mount_lock);
 	// 路径以'/'开头
+	// CASE 1:
+	// CASE 3:
 	if (*s == '/') {
 		if (flags & LOOKUP_RCU)
 			rcu_read_lock();
@@ -856,6 +879,9 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 		rcu_read_unlock();
 		return ERR_PTR(-ECHILD);
 	// 一般来说open时dfd是AT_FDCWD（见do_sys_open参数）
+	// CASE 2:
+	// CASE 4:
+	// CASE 5:
 	} else if (nd->dfd == AT_FDCWD) {
 		// path_openat传入flags时默认设置LOOKUP_RCU
 		// 根据current->fs->pwd来初始化nd->path和nd->inode
@@ -871,12 +897,14 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 				nd->inode = nd->path.dentry->d_inode;
 				nd->seq = __read_seqcount_begin(&nd->path.dentry->d_seq);
 			} while (read_seqcount_retry(&fs->seq, seq));
+		// 不关注这里
 		} else {
 			get_fs_pwd(current->fs, &nd->path);
 			nd->inode = nd->path.dentry->d_inode;
 		}
 		return s;
 	// 如果是openat的话一般不为AT_FDCWD
+	// 我们关注open流程就不处理这个了
 	} else {
 		/* Caller must check execute permissions on the starting path component */
 		struct fd f = fdget_raw(nd->dfd);
