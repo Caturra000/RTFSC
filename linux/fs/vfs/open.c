@@ -186,6 +186,8 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 		// 虽然没懂hash_name的算法（写的啥玩意啊），但是hashlen_len的注释里阐述了一种很神奇的hash用法
 		// 整个hash值是u64的，高32位存储被哈希的字符串的长度
 		// 因此，hashlen_len(x)实现就是 x >> 32，直接反推得到长度
+		// 另外，变量名hash_len的意思是hash and length（见hashlen_string()注释）
+		// 但凡命名好一点或者用两个变量也不用看懵这么久（我还以为是哈希的数位长度）
 		if (name[0] == '.') switch (hashlen_len(hash_len)) {
 			case 2:
 				if (name[1] == '.') {
