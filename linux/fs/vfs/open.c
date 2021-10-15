@@ -23,8 +23,9 @@
 // 5.2. 初始化查找路径，就是构造nd，更细点就是构造<root, path, inode>三元组，携带上前面提到的open_flags状态机
 // 5.3. 循环处理分量，或者说名字解析，换到代码来看就是从一个filename实例（靠nd上下文的更新）转为最终分量对应的dentry
 // 5.3.1. 这个找dentry的过程是最重要的优化了，内核实现分2种方法：fast lookup和slow lookup
-// 5.3.2. fast lookup: dentry是放在dcache（大概这名字）一个大的缓存块里面，因此可以尝试hash直接得到已经在cache里的dentry，找不到再看5.3.3
+// 5.3.2. fast lookup: dentry是放在dcache（大概这名字）一个大的缓存块里面，因此可以尝试hash（以最原始的name为key做hash）直接得到已经在cache里的dentry，找不到再看5.3.3
 // 5.3.3. slow lookup: 没有找到，说不定是被淘汰置换了（或者从来没有放进去），那就问具体文件系统的inode->i_op->lookup
+// 5.4. 打开文件的vfs_open执行，前面得到的信息想办法填充到打开文件file实例中，这里也会回调具体文件系统的f_op->open，干的事情也应该是填充file实例
 //
 // 真希望我再也不看这块代码，简直是地狱
 
@@ -522,7 +523,7 @@ finish_open:
 
 	// CASE 1:
 	// CASE 2:
-	// 其实下面流程已经没啥事情了，就调用一下vfs_open（并没有什么重要事情），然后返回0
+	// 其实下面流程已经没啥事情了，就调用一下vfs_open（并没有什么重要事情，可认为填充file实例），然后返回0
 
 	audit_inode(nd->name, nd->path.dentry, 0);
 	error = -EISDIR;
