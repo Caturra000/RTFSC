@@ -5,6 +5,8 @@
  * and the problem, and then passes it off to one of the appropriate
  * routines.
  */
+// 1. 首先是看address对于current->mm来说是位于good_area还是bad_area
+// 2. good_area的话调用handle_mm_fault()
 static noinline void
 __do_page_fault(struct pt_regs *regs, unsigned long error_code,
 		unsigned long address)
@@ -302,6 +304,8 @@ int handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
  * The mmap_sem may have been released depending on flags and our
  * return value.  See filemap_fault() and __lock_page_or_retry().
  */
+// 1. 构造vmf
+// 2. 调用handle_pte_fault()，传入vmf
 static int __handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 		unsigned int flags)
 {
@@ -402,6 +406,8 @@ static int __handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
  * The mmap_sem may have been released depending on flags and our return value.
  * See filemap_fault() and __lock_page_or_retry().
  */
+// fault其实分类挺多的，这里先关注pte未分配下且非匿名页的do_fault()
+// do_fault()大致上是调用vma对应的vm_ops->fault，但也区分read_fault / cow_fault / shared_fault
 static int handle_pte_fault(struct vm_fault *vmf)
 {
 	pte_t entry;
