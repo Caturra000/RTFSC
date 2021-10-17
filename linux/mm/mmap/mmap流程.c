@@ -3,6 +3,8 @@
 /*
  * The caller must hold down_write(&current->mm->mmap_sem).
  */
+// 1. 检查条件
+// 2. mmap_region
 unsigned long do_mmap(struct file *file, unsigned long addr,
 			unsigned long len, unsigned long prot,
 			unsigned long flags, vm_flags_t vm_flags,
@@ -163,7 +165,10 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 	return addr;
 }
 
-// 分配region
+// 1. 分配vma，可能来自于vma_merge或者vm_area_alloc
+// 2. 如果是文件映射，则处理file和vma的关联，并且因为是file，所以调用file->f_op->mmap()实现注册vma->vm_ops
+// 3. 如果是匿名共享，则映射至/dev/zero
+// 4. 其他情况略
 unsigned long mmap_region(struct file *file, unsigned long addr,
 		unsigned long len, vm_flags_t vm_flags, unsigned long pgoff,
 		struct list_head *uf)
