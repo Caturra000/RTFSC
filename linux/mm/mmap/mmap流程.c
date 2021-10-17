@@ -166,8 +166,8 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 }
 
 // 1. 分配vma，可能来自于vma_merge或者vm_area_alloc
-// 2. 如果是文件映射，则处理file和vma的关联，并且因为是file，所以调用file->f_op->mmap()实现注册vma->vm_ops
-// 3. 如果是匿名共享，则映射至/dev/zero
+// 2. 如果是文件映射，则处理file和vma的关联（vm_file），并且因为是file，所以调用file->f_op->mmap()实现注册vma->vm_ops
+// 3. 如果是匿名共享，则映射至/dev/zero，显然kernel知道它是什么file类型，因此不用f_op就直接注册vma->vm_ops
 // 4. 其他情况略
 unsigned long mmap_region(struct file *file, unsigned long addr,
 		unsigned long len, vm_flags_t vm_flags, unsigned long pgoff,
