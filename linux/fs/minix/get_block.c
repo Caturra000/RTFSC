@@ -170,6 +170,8 @@ static int alloc_branch(struct inode *inode,
 	int parent = minix_new_block(inode);
 
 	branch[0].key = cpu_to_block(parent);
+	// branch[0].p是没有赋值的，按某fs的做法猜测是考虑崩溃一致性
+	// 可以做到不到最后一刻（splice_branch）不管怎么崩溃都不会产生问题
 	if (parent) for (n = 1; n < num; n++) {
 		struct buffer_head *bh;
 		/* Allocate the next block */
