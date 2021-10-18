@@ -507,6 +507,7 @@ unlock:
  * The mmap_sem may have been released depending on flags and our
  * return value.  See filemap_fault() and __lock_page_or_retry().
  */
+// 区分不同情况下的fault处理，但不管怎样，最后还是会调用到vma->vm_ops->fault()
 static int do_fault(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
@@ -515,10 +516,13 @@ static int do_fault(struct vm_fault *vmf)
 	/* The VMA was not fully populated on mmap() or missing VM_DONTEXPAND */
 	if (!vma->vm_ops->fault)
 		ret = VM_FAULT_SIGBUS;
+	// 私有文件映射和共享映射的读异常
 	else if (!(vmf->flags & FAULT_FLAG_WRITE))
 		ret = do_read_fault(vmf);
+	// 私有文件映射的写异常
 	else if (!(vma->vm_flags & VM_SHARED))
 		ret = do_cow_fault(vmf);
+	// 共享文件映射的写异常
 	else
 		ret = do_shared_fault(vmf);
 
@@ -554,6 +558,8 @@ static int do_fault(struct vm_fault *vmf)
  *
  * We never return with VM_FAULT_RETRY and a bit from VM_FAULT_ERROR set.
  */
+// 最通用的fault回调
+// 其实整个流程还是会走到类似的generic read操作
 vm_fault_t filemap_fault(struct vm_fault *vmf)
 {
 	int error;
