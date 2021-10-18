@@ -39,7 +39,9 @@
 #define _struct_page_alignment
 #endif
 
+// 体系结构无关的页描述符
 struct page {
+	// 页帧标志
 	unsigned long flags;		/* Atomic flags, some possibly
 					 * updated asynchronously */
 	/*
@@ -57,7 +59,9 @@ struct page {
 			 */
 			struct list_head lru;
 			/* See page-flags.h for PAGE_MAPPING_FLAGS */
+			// 描述页面映射
 			struct address_space *mapping;
+			// 页帧在mapping中的偏移 / 换出标记
 			pgoff_t index;		/* Our offset within mapping. */
 			/**
 			 * @private: Mapping-private opaque data.
@@ -83,6 +87,7 @@ struct page {
 			};
 			struct kmem_cache *slab_cache; /* not slob */
 			/* Double-word boundary */
+			// 用于slab（泛指），指向slab第一个空闲对象
 			void *freelist;		/* first free object */
 			union {
 				void *s_mem;	/* slab: first object */
@@ -94,6 +99,7 @@ struct page {
 				};
 			};
 		};
+		// 复合页帧相关
 		struct {	/* Tail pages of compound page */
 			unsigned long compound_head;	/* Bit zero is set */
 
@@ -137,6 +143,7 @@ struct page {
 		 * If the page can be mapped to userspace, encodes the number
 		 * of times this page is referenced by a page table.
 		 */
+		// 页帧映射的进程页表项数目，负数表示没有
 		atomic_t _mapcount;
 
 		/*
@@ -145,6 +152,7 @@ struct page {
 		 * is used for.  See page-flags.h for a list of page types
 		 * which are currently stored here.
 		 */
+		// 用于区分页帧类型
 		unsigned int page_type;
 
 		unsigned int active;		/* SLAB */
@@ -152,6 +160,7 @@ struct page {
 	};
 
 	/* Usage count. *DO NOT USE DIRECTLY*. See page_ref.h */
+	// 引用计数器
 	atomic_t _refcount;
 
 #ifdef CONFIG_MEMCG
@@ -178,20 +187,122 @@ struct page {
 #endif
 } _struct_page_alignment;
 
-#define PAGE_FRAG_CACHE_MAX_SIZE	__ALIGN_MASK(32768, ~PAGE_MASK)
-#define PAGE_FRAG_CACHE_MAX_ORDER	get_order(PAGE_FRAG_CACHE_MAX_SIZE)
 
-struct page_frag_cache {
-	void * va;
-#if (PAGE_SIZE < PAGE_FRAG_CACHE_MAX_SIZE)
-	__u16 offset;
-	__u16 size;
-#else
-	__u32 offset;
+/*
+ * Various page->flags bits:
+ *
+ * PG_reserved is set for special pages, which can never be swapped out. Some
+ * of them might not even exist...
+ *
+ * The PG_private bitflag is set on pagecache pages if they contain filesystem
+ * specific data (which is normally at page->private). It can be used by
+ * private allocations for its own usage.
+ *
+ * During initiation of disk I/O, PG_locked is set. This bit is set before I/O
+ * and cleared when writeback _starts_ or when read _completes_. PG_writeback
+ * is set before writeback starts and cleared when it finishes.
+ *
+ * PG_locked also pins a page in pagecache, and blocks truncation of the file
+ * while it is held.
+ *
+ * page_waitqueue(page) is a wait queue of all tasks waiting for the page
+ * to become unlocked.
+ *
+ * PG_uptodate tells whether the page's contents is valid.  When a read
+ * completes, the page becomes uptodate, unless a disk I/O error happened.
+ *
+ * PG_referenced, PG_reclaim are used for page reclaim for anonymous and
+ * file-backed pagecache (see mm/vmscan.c).
+ *
+ * PG_error is set to indicate that an I/O error occurred on this page.
+ *
+ * PG_arch_1 is an architecture specific page state bit.  The generic code
+ * guarantees that this bit is cleared for a page when it first is entered into
+ * the page cache.
+ *
+ * PG_hwpoison indicates that a page got corrupted in hardware and contains
+ * data with incorrect ECC bits that triggered a machine check. Accessing is
+ * not safe since it may cause another machine check. Don't touch!
+ */
+
+/*
+ * Don't use the *_dontuse flags.  Use the macros.  Otherwise you'll break
+ * locked- and dirty-page accounting.
+ *
+ * The page flags field is split into two parts, the main flags area
+ * which extends from the low bits upwards, and the fields area which
+ * extends from the high bits downwards.
+ *
+ *  | FIELD | ... | FLAGS |
+ *  N-1           ^       0
+ *               (NR_PAGEFLAGS)
+ *
+ * The fields area is reserved for fields mapping zone, node (for NUMA) and
+ * SPARSEMEM section (for variants of SPARSEMEM that require section ids like
+ * SPARSEMEM_EXTREME with !SPARSEMEM_VMEMMAP).
+ */
+enum pageflags {
+	PG_locked,		/* Page is locked. Don't touch. */
+	PG_error,
+	PG_referenced,
+	PG_uptodate,
+	PG_dirty,
+	PG_lru,
+	PG_active,
+	PG_waiters,		/* Page has waiters, check its waitqueue. Must be bit #7 and in the same byte as "PG_locked" */
+	PG_slab,
+	PG_owner_priv_1,	/* Owner use. If pagecache, fs may use*/
+	PG_arch_1,
+	PG_reserved,
+	PG_private,		/* If pagecache, has fs-private data */
+	PG_private_2,		/* If pagecache, has fs aux data */
+	PG_writeback,		/* Page is under writeback */
+	PG_head,		/* A head page */
+	PG_mappedtodisk,	/* Has blocks allocated on-disk */
+	PG_reclaim,		/* To be reclaimed asap */
+	PG_swapbacked,		/* Page is backed by RAM/swap */
+	PG_unevictable,		/* Page is "unevictable"  */
+#ifdef CONFIG_MMU
+	PG_mlocked,		/* Page is vma mlocked */
 #endif
-	/* we maintain a pagecount bias, so that we dont dirty cache line
-	 * containing page->_refcount every time we allocate a fragment.
+#ifdef CONFIG_ARCH_USES_PG_UNCACHED
+	PG_uncached,		/* Page has been mapped as uncached */
+#endif
+#ifdef CONFIG_MEMORY_FAILURE
+	PG_hwpoison,		/* hardware poisoned page. Don't touch */
+#endif
+#if defined(CONFIG_IDLE_PAGE_TRACKING) && defined(CONFIG_64BIT)
+	PG_young,
+	PG_idle,
+#endif
+	__NR_PAGEFLAGS,
+
+	/* Filesystems */
+	PG_checked = PG_owner_priv_1,
+
+	/* SwapBacked */
+	PG_swapcache = PG_owner_priv_1,	/* Swap page: swp_entry_t in private */
+
+	/* Two page bits are conscripted by FS-Cache to maintain local caching
+	 * state.  These bits are set on pages belonging to the netfs's inodes
+	 * when those inodes are being locally cached.
 	 */
-	unsigned int		pagecnt_bias;
-	bool pfmemalloc;
+	PG_fscache = PG_private_2,	/* page backed by cache */
+
+	/* XEN */
+	/* Pinned in Xen as a read-only pagetable page. */
+	PG_pinned = PG_owner_priv_1,
+	/* Pinned as part of domain save (see xen_mm_pin_all()). */
+	PG_savepinned = PG_dirty,
+	/* Has a grant mapping of another (foreign) domain's page. */
+	PG_foreign = PG_owner_priv_1,
+
+	/* SLOB */
+	PG_slob_free = PG_private,
+
+	/* Compound pages. Stored in first tail page's flags */
+	PG_double_map = PG_private_2,
+
+	/* non-lru isolated movable page */
+	PG_isolated = PG_reclaim,
 };
