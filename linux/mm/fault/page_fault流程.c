@@ -449,12 +449,18 @@ static int handle_pte_fault(struct vm_fault *vmf)
 	}
 
 	if (!vmf->pte) {
+		// PTE表项无效，且是匿名页
+		// 可能是匿名内存映射，或者是堆/栈的普通内存访问
 		if (vma_is_anonymous(vmf->vma))
 			return do_anonymous_page(vmf);
+		// PTE表项无效，且是文件页
+		// 可能是文件内存映射
 		else
 			return do_fault(vmf);
 	}
 
+	// PTE表项有效，但页不在内存
+	// 可能是内存页被交换到了外存
 	if (!pte_present(vmf->orig_pte))
 		return do_swap_page(vmf);
 
@@ -467,6 +473,8 @@ static int handle_pte_fault(struct vm_fault *vmf)
 	if (unlikely(!pte_same(*vmf->pte, entry)))
 		goto unlock;
 	if (vmf->flags & FAULT_FLAG_WRITE) {
+		// PTE表项有效，但试图写一个不可写页
+		// 可能是COW
 		if (!pte_write(entry))
 			return do_wp_page(vmf);
 		entry = pte_mkdirty(entry);
