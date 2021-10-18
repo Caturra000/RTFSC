@@ -4,11 +4,12 @@
 // TODO per-thread VMA cache
 struct mm_struct {
 	struct {
-                // 通过vma联系到虚拟地址， 又通过pgd联系到物理地址
+		// 通过vma联系到虚拟地址， 又通过pgd联系到物理地址
 		struct vm_area_struct *mmap;		/* list of VMAs */  // 链表头节点
 		struct rb_root mm_rb;                   // 红黑树的root
 		u64 vmacache_seqnum;                   /* per-thread vmacache */   // 红黑树已经满足不了效率了，进一步利用局部性原理 更多查询：https://zhuanlan.zhihu.com/p/99124666
 #ifdef CONFIG_MMU
+		// 用于获取mmap未映射区域
 		unsigned long (*get_unmapped_area) (struct file *filp,
 				unsigned long addr, unsigned long len,
 				unsigned long pgoff, unsigned long flags);
@@ -20,6 +21,7 @@ struct mm_struct {
 		unsigned long mmap_compat_base;
 		unsigned long mmap_compat_legacy_base;
 #endif
+		// 见TASK_SIZE
 		unsigned long task_size;	/* size of task vm space */
 		unsigned long highest_vm_end;	/* highest vma end address */
 		pgd_t * pgd; // 指向进程的page dir
@@ -43,6 +45,7 @@ struct mm_struct {
 		 * @mm_count (which may then free the &struct mm_struct if
 		 * @mm_count also drops to 0).
 		 */
+		// 次引用计数，task_struct个数
 		atomic_t mm_users;
 
 		/**
@@ -52,6 +55,7 @@ struct mm_struct {
 		 * Use mmgrab()/mmdrop() to modify. When this drops to 0, the
 		 * &struct mm_struct is freed.
 		 */
+		// 主引用计数，包括内核线程
 		atomic_t mm_count;
 
 		/**
