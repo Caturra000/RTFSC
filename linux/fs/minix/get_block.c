@@ -100,8 +100,11 @@ static int block_to_path(struct inode * inode, long block, int offsets[DEPTH])
 			printk("MINIX-fs: block_to_path: "
 			       "block %ld too big on dev %pg\n",
 				block, sb->s_bdev);
+	// DIRCOUNT == 7
+	// 这些offsets应该是块内偏移
 	} else if (block < DIRCOUNT) {
 		offsets[n++] = block;
+	// INDIRCOUNT(sb) == (1 << ((sb)->s_blocksize_bits - 2))
 	} else if ((block -= DIRCOUNT) < INDIRCOUNT(sb)) {
 		offsets[n++] = DIRCOUNT;
 		offsets[n++] = block;
@@ -131,11 +134,15 @@ static inline Indirect *get_branch(struct inode *inode,
 
 	*err = 0;
 	/* i_data is not going away, no lock needed */
+	// 至少第一层是有的
+	// i_data读取u.i2_data（__u32[16]数组，一般用0-9，剩下的做padding），数据来自raw_inode的i_zone
+	// i_zone就是用于存储位置信息
 	add_chain (chain, NULL, i_data(inode) + *offsets);
 	if (!p->key)
 		goto no_block;
 	while (--depth) {
 		// 读入内容到bh
+		// 如果cache没命中，则会有IO产生
 		bh = sb_bread(sb, block_to_cpu(p->key));
 		if (!bh)
 			goto failure;
