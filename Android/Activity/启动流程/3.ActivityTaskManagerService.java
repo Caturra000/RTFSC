@@ -20,6 +20,10 @@
                 true /*validateIncomingUser*/);
     }
 
+	// caller: 启动源Activity的ActivityThread获得的IApplicationThread对象
+	// callingPackage: 启动源Activity的所在包名，Activity.getBasePackageName()得到
+	// resultTo: 启动源activity的内部Token
+	// resultWho: 启动源Activity的id(mEmbeddedID)
     private int startActivityAsUser(IApplicationThread caller, String callingPackage,
             @Nullable String callingFeatureId, Intent intent, String resolvedType,
             IBinder resultTo, String resultWho, int requestCode, int startFlags,

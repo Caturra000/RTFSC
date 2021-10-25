@@ -14,6 +14,8 @@
 
             final LaunchingState launchingState;
             synchronized (mService.mGlobalLock) {
+                // mRequest.resultTo是一个IBinder接口，也是token
+                // TODO token -> ActivityRecord
                 final ActivityRecord caller = ActivityRecord.forTokenLocked(mRequest.resultTo);
                 launchingState = mSupervisor.getActivityMetricsLogger().notifyActivityLaunching(
                         mRequest.intent, caller);
@@ -128,6 +130,7 @@
         final Bundle verificationBundle =
                 options != null ? options.popAppVerificationBundle() : null;
 
+        // WindowProcessController在WM中保存的应用进程信息，对应于AMS中的ProcessRecord
         WindowProcessController callerApp = null;
         if (caller != null) {
             callerApp = mService.getProcessController(caller);
@@ -141,6 +144,7 @@
             }
         }
 
+        // 目标Activity的userId
         final int userId = aInfo != null && aInfo.applicationInfo != null
                 ? UserHandle.getUserId(aInfo.applicationInfo.uid) : 0;
         if (err == ActivityManager.START_SUCCESS) {
@@ -148,14 +152,19 @@
                     + "} from uid " + callingUid);
         }
 
+        // 表示启动源ActivityRecord对象
         ActivityRecord sourceRecord = null;
+        // 表示目标Activity启动完成后，接收结果的Activity的ActivityRecord对象，正常情况下sourceRecord=resultRecord
         ActivityRecord resultRecord = null;
+        // 如果requestCode存在，resultTo就不为null
         if (resultTo != null) {
+            // 查找ActivityStack中是否存在此启动源ActivityRecord
             sourceRecord = mRootWindowContainer.isInAnyStack(resultTo);
             if (DEBUG_RESULTS) {
                 Slog.v(TAG_RESULTS, "Will send result to " + resultTo + " " + sourceRecord);
             }
             if (sourceRecord != null) {
+                // TODO finishing标记
                 if (requestCode >= 0 && !sourceRecord.finishing) {
                     resultRecord = sourceRecord;
                 }
@@ -163,6 +172,7 @@
         }
 
         final int launchFlags = intent.getFlags();
+        // TODO FLAG_ACTIVITY_FORWARD_RESULT
         if ((launchFlags & Intent.FLAG_ACTIVITY_FORWARD_RESULT) != 0 && sourceRecord != null) {
             // Transfer the result target from the source activity to the new one being started,
             // including any failures.
@@ -378,6 +388,7 @@
                 callingUid = realCallingUid;
                 callingPid = realCallingPid;
 
+                // 通过PKMS解析Intent，得到ResolveInfo，启动目标Activity的所有信息都在此对象中保存
                 rInfo = mSupervisor.resolveIntent(intent, resolvedType, userId, 0,
                         computeResolveFilterUid(
                                 callingUid, realCallingUid, request.filterCallingUid));
@@ -413,6 +424,7 @@
             aInfo = mSupervisor.resolveActivity(intent, rInfo, startFlags, null /*profilerInfo*/);
         }
 
+        // 构造ActivityRecord
         final ActivityRecord r = new ActivityRecord(mService, callerApp, callingPid, callingUid,
                 callingPackage, callingFeatureId, intent, resolvedType, aInfo,
                 mService.getGlobalConfiguration(), resultRecord, resultWho, requestCode,
@@ -426,6 +438,7 @@
             r.appTimeTracker = sourceRecord.appTimeTracker;
         }
 
+        // 根窗口容器顶部的ActivityStack
         final ActivityStack stack = mRootWindowContainer.getTopDisplayFocusedStack();
 
         // If we are starting an activity that is not from the same uid as the currently resumed

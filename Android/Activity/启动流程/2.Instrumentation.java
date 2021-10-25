@@ -1,4 +1,5 @@
 // 文件：frameworks/base/core/java/android/app/Instrumentation.java
+// TL;DR Instrumentation相关的其实不必多看，这个类只是为了加上一些Monitor来捕获intent
 
     /**
      * Execute a startActivity call made by the application.  The default
@@ -43,6 +44,11 @@
      *
      * {@hide}
      */
+    // 当mParent == null时
+    // who: 调用的activity
+    // contextThread: (ApplicationThread) who.mMainThread.mAppThread
+    // token: who.mToken
+    // target: who
     @UnsupportedAppUsage
     public ActivityResult execStartActivity(
             Context who, IBinder contextThread, IBinder token, Activity target,
@@ -52,6 +58,7 @@
         if (referrer != null) {
             intent.putExtra(Intent.EXTRA_REFERRER, referrer);
         }
+        // 忽略
         if (mActivityMonitors != null) {
             synchronized (mSync) {
                 final int N = mActivityMonitors.size();
@@ -76,6 +83,7 @@
         }
         try {
             intent.migrateExtraStreamToClipData(who);
+            // TODO 准备离开当前线程
             intent.prepareToLeaveProcess(who);
             int result = ActivityTaskManager.getService().startActivity(whoThread,
                     who.getBasePackageName(), who.getAttributionTag(), intent,
