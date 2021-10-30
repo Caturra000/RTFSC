@@ -1,5 +1,12 @@
 // 文件：/include/linux/sched.h
 
+
+// 进程的状态分为运行状态和退出状态，分别用TASK_和EXIT_前缀来标记
+// 但是这些字段本身含义也复杂，有些是内部用的，有些是复合状态
+// 而且源码给出字段的顺序并不是按照功能/含义区分的，而是按照历史添加顺序直接贴上去的orz
+// 我觉得看task_state_array给出的解释会好一点
+
+
 /*
  * Task state bitmask. NOTE! These bits are also
  * encoded in fs/proc/array.c: get_task_state().
@@ -66,6 +73,7 @@ static inline unsigned int task_state_index(struct task_struct *tsk)
 	if (tsk_state == TASK_IDLE)
 		state = TASK_REPORT_IDLE;
 
+	// 位运算，find last set bit in word
 	return fls(state);
 }
 
