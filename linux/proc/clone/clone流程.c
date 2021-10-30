@@ -373,30 +373,45 @@ static __latent_entropy struct task_struct *copy_process(
 	retval = security_task_alloc(p, clone_flags);
 	if (retval)
 		goto bad_fork_cleanup_audit;
+	// 如果有CLONE_SYSVSEM，子进程共享父进程的信号量取消队列
+	// 否则子进程信号量的取消队列为NULL
 	retval = copy_semundo(clone_flags, p);
 	if (retval)
 		goto bad_fork_cleanup_security;
+	// 如果有CLONE_FILES，子进程共享父进程的files字段（打开文件的信息）
+	// 否则通过dup_fd()复制父进程的files字段
 	retval = copy_files(clone_flags, p);
 	if (retval)
 		goto bad_fork_cleanup_semundo;
+	// 如果有CLONE_FS，子进程共享父进程的fs字段（根目录、当前目录等文件系统上下文相关信息）
+	// 否则通过copy_fs_struct()复制父进程的fs字段
 	retval = copy_fs(clone_flags, p);
 	if (retval)
 		goto bad_fork_cleanup_files;
+	// 如果有CLONE_SIGHAND，子进程共享父进程的sighand字段（信号的处理函数信息）
+	// 否则通过memcpy()复制父进程的sighand字段
 	retval = copy_sighand(clone_flags, p);
 	if (retval)
 		goto bad_fork_cleanup_fs;
+	// 如果有CLONE_SIGNAL(CLONE_SIGHAND or CLONE_THREAD)，子进程共享父进程的signal字段（信号中体系结构无关的通用信息）
+	// 否则重新分配并初始化一个signal字段
 	retval = copy_signal(clone_flags, p);
 	if (retval)
 		goto bad_fork_cleanup_sighand;
+	// 如果有CLONE_MM，子进程共享父进程的mm和active_mm
+	// 否则通过dup_mm()复制父进程地址空间的各级页表（内存页面仍然共享，但设为只读）
 	retval = copy_mm(clone_flags, p);
 	if (retval)
 		goto bad_fork_cleanup_signal;
+	// TODO nsproxy
 	retval = copy_namespaces(clone_flags, p);
 	if (retval)
 		goto bad_fork_cleanup_mm;
+	// TODO io_context
 	retval = copy_io(clone_flags, p);
 	if (retval)
 		goto bad_fork_cleanup_namespaces;
+	// 体系结构相关
 	retval = copy_thread_tls(clone_flags, stack_start, stack_size, p, tls);
 	if (retval)
 		goto bad_fork_cleanup_io;
