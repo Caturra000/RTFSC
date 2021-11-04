@@ -32,6 +32,8 @@ context_switch(struct rq *rq, struct task_struct *prev,
 		mmgrab(oldmm);
 		enter_lazy_tlb(oldmm, next);
 	} else
+		// TODO 切换页表？核心流程可能是load_new_mm_cr3
+		// 即使切换了mm也不会引起控制流的变化，因为每个进程的kernel映射是一样的
 		switch_mm_irqs_off(oldmm, mm, next);
 
 	if (!prev->mm) {
@@ -55,6 +57,14 @@ context_switch(struct rq *rq, struct task_struct *prev,
 
 // 文件：/arch/x86/include/asm/switch_to.h
 
+// 从上面的流程注释可以看到，这里的流程就是要切换寄存器和栈
+//
+// 似乎是因为历史原因所以会是宏的形式，可能考虑到传参的影响
+//
+// prev和next是输入的参数，last为输出（因为是宏所以只能这么干）
+// prev：要换走的当前进程
+// next：被选中的要换入的下一个进程
+// last：切换到当前进程的进程
 #define switch_to(prev, next, last)					\
 do {									\
 	prepare_switch_to(next);					\
@@ -97,6 +107,7 @@ ENTRY(__switch_to_asm)
 	 * Save callee-saved registers
 	 * This must match the order in struct inactive_task_frame
 	 */
+	// TODO struct inactive_task_frame
 	pushl	%ebp
 	pushl	%ebx
 	pushl	%edi
