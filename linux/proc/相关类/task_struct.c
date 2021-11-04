@@ -1,5 +1,39 @@
 // 文件分布：/include/linux/sched.h
 
+// 这个类过于庞大了，可以按照CONFIG_前缀来划分进程于不同模块的字段
+//
+// 一些常见的字段:
+// 状态
+//     state
+//     exit_state
+// 引用计数
+//     usage
+//     rcu_usage
+// 调度
+//     优先级
+//         prio
+//         static_prio
+//         normal_prio
+//         rt_priority
+//     调度类、实体和策略
+//         sched_class
+//         se
+//         rt
+//         dl
+//         policy
+// 自身关系
+//     tasks
+//     parent
+//     children
+//     sibling
+// 文件系统和打开文件
+//     fs
+//     files
+// 地址空间
+//     mm
+// 信号
+//     signal
+//     sighand
 struct task_struct {
 #ifdef CONFIG_THREAD_INFO_IN_TASK
 	/*
