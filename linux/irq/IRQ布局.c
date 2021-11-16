@@ -22,3 +22,8 @@
  *
  * This file enumerates the exact layout of them:
  */
+
+// Intel SDM Vol.3提到，x86体系下interrupt是不归类到exception里面的，
+// 然而迷惑的是0-31号vector中有部分就是interrupt
+// 更迷惑的是enum全部用X86_TRAP前缀来命名，明明里面不仅有interrupt，还有其它类型的exception比如fault
+// 既然手册都这么随便了，那就算了吧，不纠结了
