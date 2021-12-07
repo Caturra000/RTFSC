@@ -1,3 +1,7 @@
+  // __shared_count可以隔离并发计数和deleter的实现细节
+  // 本身主要提供较为复杂的ctor，和使用到的接口
+  // 繁琐的实现（线程安全处理和custom deleter）都在_Sp_counted_base里面
+  // custom deleter更多细节见PART 5
   template<_Lock_policy _Lp>
     class __shared_count
     {
@@ -36,23 +40,28 @@
 	: __shared_count(__p, __sp_array_delete{}, allocator<void>())
 	{ }
 
+      // 用于支持custom deleter，实现见##flag #0
       template<typename _Ptr, typename _Deleter,
 	       typename = typename __not_alloc_shared_tag<_Deleter>::type>
 	__shared_count(_Ptr __p, _Deleter __d)
 	: __shared_count(__p, std::move(__d), allocator<void>())
 	{ }
 
+      // 用于支持custom deleter ##flag #0
       template<typename _Ptr, typename _Deleter, typename _Alloc,
 	       typename = typename __not_alloc_shared_tag<_Deleter>::type>
 	__shared_count(_Ptr __p, _Deleter __d, _Alloc __a) : _M_pi(0)
 	{
+	  // 实现类为_Sp_counted_deleter，见PART 5
 	  typedef _Sp_counted_deleter<_Ptr, _Deleter, _Alloc, _Lp> _Sp_cd_type;
 	  __try
 	    {
 	      typename _Sp_cd_type::__allocator_type __a2(__a);
+	      // TODO __allocate_guarded
 	      auto __guard = std::__allocate_guarded(__a2);
 	      _Sp_cd_type* __mem = __guard.get();
 	      ::new (__mem) _Sp_cd_type(__p, std::move(__d), std::move(__a));
+	      // 持有_Sp_counted_deleter
 	      _M_pi = __mem;
 	      __guard = nullptr;
 	    }
@@ -183,6 +192,8 @@
     private:
       friend class __weak_count<_Lp>;
 
+      // _Sp_counted_base是一个默认实现类（或者是接口类）
+      // 对于custom deleter的支持见##flag #0
       _Sp_counted_base<_Lp>*  _M_pi;
     };
 
@@ -203,7 +214,7 @@
 
 
 
-
+  // 使用_Mutex_base提供的policy，见PART 3
   template<_Lock_policy _Lp = __default_lock_policy>
     class _Sp_counted_base
     : public _Mutex_base<_Lp>
@@ -216,6 +227,7 @@
       ~_Sp_counted_base() noexcept
       { }
 
+      // 注意_M_dispose和_M_destroy的调用时机
       // Called when _M_use_count drops to zero, to release the resources
       // managed by *this.
       virtual void
@@ -302,6 +314,7 @@
       _Sp_counted_base(_Sp_counted_base const&) = delete;
       _Sp_counted_base& operator=(_Sp_counted_base const&) = delete;
 
+      // 注意use_count和weak_count的定义
       _Atomic_word  _M_use_count;     // #shared
       _Atomic_word  _M_weak_count;    // #weak + (#shared != 0)
     };
