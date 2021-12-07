@@ -1,7 +1,14 @@
+  // 用于支持deleter的定制，注意这需要virtual的成本才能做到
+  // _Sp_counted_base见PART 4
   // Support for custom deleter and/or allocator
   template<typename _Ptr, typename _Deleter, typename _Alloc, _Lock_policy _Lp>
     class _Sp_counted_deleter final : public _Sp_counted_base<_Lp>
     {
+      // _Impl类的写法很独特
+      // 0和1的声明只是为了区分类型
+      // （_Sp_ebo_helper是一个可以抽象是否使用ebo的辅助类，见##flag #0）
+      //
+      // _Impl持有pointer / deleter / allocator
       class _Impl : _Sp_ebo_helper<0, _Deleter>, _Sp_ebo_helper<1, _Alloc>
       {
 	typedef _Sp_ebo_helper<0, _Deleter>	_Del_base;
@@ -69,12 +76,18 @@
 
 
 
-
-
+  // _Sp_ebo_helper模板中第三个参数用于决定是否用EBO优化
+  // 如果不使用，则会持有一个_Tp成员
+  // TODO 留意判断EBO的条件，为什么需要!final
   template<int _Nm, typename _Tp,
 	   bool __use_ebo = !__is_final(_Tp) && __is_empty(_Tp)>
     struct _Sp_ebo_helper;
 
+  // ##flag #0
+  // get(eboh)操作所传入的参数是关键
+  // 如果为EBO类，则返回eboh
+  // 否则返回eboh.tp
+  // trick. 算是一个技巧
   /// Specialization using EBO.
   template<int _Nm, typename _Tp>
     struct _Sp_ebo_helper<_Nm, _Tp, true> : private _Tp
@@ -119,10 +132,12 @@
       _Sp_counted_ptr(_Ptr __p) noexcept
       : _M_ptr(__p) { }
 
+      // TODO dispose操作的对于nullptr_t的特化
       virtual void
       _M_dispose() noexcept
       { delete _M_ptr; }
 
+      // TODO delete自身
       virtual void
       _M_destroy() noexcept
       { delete this; }
