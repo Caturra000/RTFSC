@@ -1,3 +1,19 @@
+// 关于std::shared_ptr
+// 原理方面，我在EASTL当中已经分析过一遍
+// 这里用于对比不同的实现
+
+// PART 0
+// 这部分展示std::shared_ptr的接口部分（删去部分注释）
+// 可以看到实现来自于__shared_ptr<_Tp>
+// shared_ptr本身已经没有实质内容
+
+// 关于__shared_ptr，见PART 1
+
+// (感兴趣 && 有空)的话可以看下面
+// ##flag #0 _Sp_alloc_shared_tag
+// ##flag #1 非标准的shared_ptr(const weak_ptr&)构造
+
+
   /**
    *  @brief  A smart pointer with reference-counted copy semantics.
    *
@@ -155,6 +171,7 @@
 	}
 
     private:
+      // ##flag #0
       // This constructor is non-standard, it is used by allocate_shared.
       template<typename _Alloc, typename... _Args>
 	shared_ptr(_Sp_alloc_shared_tag<_Alloc> __tag, _Args&&... __args)
@@ -165,6 +182,7 @@
 	friend shared_ptr<_Yp>
 	allocate_shared(const _Alloc& __a, _Args&&... __args);
 
+      // ##flag #1
       // This constructor is non-standard, it is used by weak_ptr::lock().
       shared_ptr(const weak_ptr<_Tp>& __r, std::nothrow_t)
       : __shared_ptr<_Tp>(__r, std::nothrow) { }
