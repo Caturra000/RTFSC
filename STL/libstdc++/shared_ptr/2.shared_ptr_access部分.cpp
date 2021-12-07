@@ -1,3 +1,8 @@
+// 一个空基类，用于支持operator*和operator->操作
+// 特化处理is_array和is_void的情况
+// is_void = true_type时，[可能]不允许operator*
+// is_array = true_type时，额外添加operator[]
+
   // Define operator* and operator-> for shared_ptr<T>.
   template<typename _Tp, _Lock_policy _Lp,
 	   bool = is_array<_Tp>::value, bool = is_void<_Tp>::value>
@@ -23,6 +28,8 @@
     private:
       element_type*
       _M_get() const noexcept
+      // 从这里可以看出__shared_ptr_access就是为了给__shared_ptr用的
+      // 连CRTP都不用了，直接指定this类型
       { return static_cast<const __shared_ptr<_Tp, _Lp>*>(this)->get(); }
     };
 
