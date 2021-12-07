@@ -1,3 +1,14 @@
+// 引用计数本身是线程安全的
+// 而libstdc++允许不同的并发策略
+// 默认使用_S_atomic
+// 如果不希望有线程安全的额外成本，可以指定policy为_S_single
+//
+// 具体使用于shared_count部分(_Sp_counted_base)
+//
+// 我觉得_Lock_policy一个不太好的地方是
+// 对于shared_ptr中不涉及线程安全的操作，实现上也会依赖上这个template enum
+// 比如shared_ptr_access<Tp, Lp>，对于pointer操作来说，根本就跟线程安全无关
+
   // Available locking policies:
   // _S_single    single-threaded code that doesn't need to be locked.
   // _S_mutex     multi-threaded code that requires additional support
