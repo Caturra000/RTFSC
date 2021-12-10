@@ -18,21 +18,26 @@
                             | \ return _M_h1()(__key)
                                 | - std::hash()(__key)
             | \ size_type __bkt = _M_bucket_index(__k, __code)
-                | \ __hash_code_base::_M_bucket_index():
-                    | \ return _M_h2()(__c, __n)
-                        | \ __detail::_Mod_range_hashing::operator()(__num, __den):
-                            | - return __num % __den
+                | \ _M_bucket_index(__k, __code, _M_bucket_count):
+                    | \ _Hash_code_base::_M_bucket_index(: _Key&, __c, __n):
+                        | \ return _M_h2()(__c, __n)
+                            | \ __detail::_Mod_range_hashing::operator()(__num, __den):
+                                | - return __num % __den
             | \ if: __node_type* __p = _M_find_node(__bkt, __k, __code)
                 | \ _M_find_node(__n, __k, __code):
-                    | - __node_base* __prev_p = _M_buckets[__n]
-                    | \ if: !__prev_p
-                        | - return nulltpr
-                    | \ for: __p <- [static_cast<__node_type*>(__prev_p->_M_nxt), ...) next: __p->_M_next()
-                        | \ if: this->_M_equals(__k, __code, __p)
-                            | - return __prev_p
-                        | \ if: !__p->_M_nxt || _M_bucket_index(__p->_M_next()) != __n
-                            | - break
-                        | - __prev_p = __p
+                    | \ __node_base* __before_n = _M_find_before_node(__bkt, __key, __c)
+                        | - __node_base* __prev_p = _M_buckets[__n]
+                        | \ if: !__prev_p
+                            | - return nulltpr
+                        | \ for: __p <- [static_cast<__node_type*>(__prev_p->_M_nxt), ...) next: __p->_M_next()
+                            | \ if: this->_M_equals(__k, __code, __p)
+                                | - return __prev_p
+                            | \ if: !__p->_M_nxt || _M_bucket_index(__p->_M_next()) != __n
+                                | - break
+                            | - __prev_p = __p
+                        | - return nullptr
+                    | \ if: __before_n
+                        | - return static_cast<__node_type*>(__before_n->_M_nxt)
                     | - return nullptr
                 | - this->_M_deallocate_node(__node)
                 | - return std::make_pair(iterator(__p), false)
