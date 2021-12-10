@@ -1,0 +1,9 @@
+--> unordered_map::unordered_map()
+| \ _M_h{}
+    | - _M_buckets{&_M_single_bucket}
+    | - _M_bucket_count{1}
+    | - _M_before_begin{}
+    | - _M_element_count{0}
+    | \ _M_rehash_policy{_Prime_rehash_policy}
+        | - _M_max_load_factor{__z = 1.0}
+        | - _M_next_resize{0}
