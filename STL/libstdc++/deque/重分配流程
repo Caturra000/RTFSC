@@ -1,0 +1,21 @@
+--> deque::_M_reallocate_map(__nodes_to_add: size_type, __add_at_front: bool)
+| - __old_num_nodes = this->_M_impl._M_finish._M_node - this->_M_impl._M_start._M_node + 1
+| - __new_num_nodes = __old_num_nodes + __nodes_to_add
+| - _Map_pointer __new_nstart
+| \ if: this->_M_impl._M_map_size > 2 * __new_num_nodes
+    | - __new_nstart = this->_M_impl._M_map
+    |       + (this->_M_impl._M_map_size - __new_num_nodes) / 2
+    |       + (__add_at_front ? __nodes_to_add : 0)
+    | \ if: __new_nstart < this->_M_impl._M_start._M_node
+        | - std::copy(this->_M_impl._M_start._M_node,
+        |       this->_M_impl._M_finish._M_node + 1, __new_nstart)
+    | \ else:
+        | - std::copy_backward(this->_M_impl._M_start._M_node,
+        |       this->_M_impl._M_finish._M_node + 1, __new_nstart + __old_num_nodes)
+| \ else:
+    | - __new_map_size = this->_M_impl._M_map_size +
+    |       std::max(this->_M_impl._M_map_size, __nodes_to_add) + 2
+    | - std::copy(this->_M_impl._M_start._M_node, this->_M_impl._M_finish._M_node + 1, __new_nstart)
+    | - _M_deallocate_map(this->_M_impl._M_map, this->_M_impl._M_map_size)
+| - this->_M_impl._M_map = __new_map
+| - this->_M_impl._M_map_size = __new_map_size
