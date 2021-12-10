@@ -1,0 +1,14 @@
+--> _Deque_iterator::operator+=(__n: difference_type)
+| - __offset = __n + (_M_cur - _M_first)
+| \ if: __offset >= 0 && __offset < _S_buffer_size()
+    | - _M_cur += __n
+| \ else:
+    | - __node_offset = __offset > 0 ? __offset / _S_buffer_size()
+    |       : -((-__offset - 1) / _S_buffer_size()) - 1
+    | \ _M_set_node(_M_node + __node_offset)
+        | - param: __new_node
+        | - _M_node = __new_node
+        | - _M_first = *__new_node
+        | - _M_last = _M_first + _S_buffer_size()
+    | - _M_cur = _M_first + (__offset - __node_offset * _S_buffer_size())
+| - return *this
