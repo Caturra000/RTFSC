@@ -1,0 +1,69 @@
+--> deque::emplace_back(Args&&...)
+| \ if: this->_M_impl._M_finish._M_cur != this->_M_impl._M_finish._M_last - 1
+    | - _Alloc_traits::construct(this->_M_impl, this->_M_impl._M_finish._M_cur, Args&&...)
+    | - ++this->_M_impl._M_finish._M_cur
+| \ else:
+    | \ _M_push_back_aux(Args&&...)
+        | - if: size() == max_size() then: throw
+        | \ _M_reserve_map_at_back()
+            | - param: __nodes_to_add = 1
+            | \ if: __nodes_to_add + 1 > this->_M_impl._M_map_size - (this->_M_impl._M_finish._M_node - this->_M_impl._M_map)
+                | - _M_reallocate_map(__nodes_to_add, false)
+        | - *(this->_M_impl._M_finish._M_node + 1) = this->_M_allocate_node()
+        | - _Alloc_traits::construct(this->_M_impl, this->_M_impl._M_finish._M_cur, Args&&...)
+        | - this->_M_impl._M_finish._M_set_node(this->_M_impl._M_finish._M_node + 1)
+        | - this->_M_impl._M_finish._M_cur = this->_M_impl._M_finish._M_first
+
+
+
+--> deque::emplace_front(Args&&...)
+| \ if: this->_M_impl._M_start._M_cur != this->_M_impl._M_start._M_first
+    | - _Alloc_traits::construct(this->_M_impl, this->_M_impl._M_start._M_cur - 1, Args&&...)
+    | - --this->_M_impl._M_start._M_cur
+| \ else:
+    | \ _M_push_front_aux(Args&&...)
+        | - if: size() == max_size() then: throw
+        | \ _M_reserve_map_at_front()
+            | - param: __nodes_to_add = 1
+            | \ if: __nodes_to_add > size_type(this->_M_impl._M_start._M_node - this->_M_impl._M_map)
+                | - _M_reallocate_map(__nodes_to_add, true)
+        | - *(this->_M_impl._M_start._M_node - 1) = this->_M_allocate_node()
+        | - this->_M_impl._M_start._M_set_node(this->_M_impl._M_start._M_node - 1)
+        | - this->_M_impl._M_start._M_cur = this->_M_impl._M_start._M_last - 1
+        | - _Alloc_traits::construct(this->_M_impl, this->_M_impl._M_start._M_cur, Args&&...)
+
+
+
+--> deque::emplace(__position: const_iterator, Args&&...)
+| \ if: __position._M_cur == this->_M_impl._M_start._M_cur
+    | - emplace_front(Args&&...)
+    | - return this->_M_impl._M_start
+| \ else if: __position._M_cur == this->_M_impl._M_finish._M_cur
+    | - emplace_back(Args&&...)
+    | - iterator __tmp = this->_M_impl._M_finish
+    | - --__tmp
+    | - return __tmp
+| \ else:
+    | \ _M_insert_aux(__position._M_const_cast(): __pos: iterator, Args&&...)
+        | - value_type __x_copy(Args&&...)
+        | - difference_type __index = __pos - this->_M_impl._M_start
+        | \ if: __index < size() / 2
+            | - push_front(move(front()))
+            | - iterator __front1 = this->_M_impl._M_start
+            | - ++__front1
+            | - iterator __front2 = __front1
+            | - ++_front2
+            | - __pos = this->_M_impl._M_start + __index
+            | - iterator __pos1 = __pos
+            | - ++__pos1
+            | - move3(__front2, __pos1, __front1)
+        | \ else:
+            | - push_back(move(back()))
+            | - iterator __back1 = this->_M_impl._M_finish
+            | - --__back1
+            | - iterator __back2 = __back1
+            | - --__back2
+            | - __pos = this->_M_impl._M_start + __index
+            | - move3(__pos, __back2, __back1)
+        | - *__pos = move(__x_copy)
+        | - return __pos
