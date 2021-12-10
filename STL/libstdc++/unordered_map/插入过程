@@ -1,0 +1,59 @@
+--> unordered_map::emplace(_Args&&...)
+| \ return _M_h.emplace(_Args&&...)
+    | \ return _Hashtable::_M_emplace(__unique_keys(), _Args&&...)
+        | \ _Hashtable(std::true_type, _Args&&...):
+            | - __node_type* __node = this->_M_allocate_node(_Args&&...)
+            | \ const key_type& __k = this->_M_extract()(__node->_M_v())
+                | \ __detail::_Hash_node::_M_v():
+                    | \ return *_M_valptr()
+                        | \ return _M_storage._M_ptr()
+                            | - __aligned_buffer<_Value>::_M_ptr()
+                | \ _Hash_code_base::_M_extract():
+                    | \ return __ebo_extract_key::_S_cget(*this)
+                        | \ _Hashtable_ebo_helper<0, _ExtractKey>::_S_cget(__eboh):
+                            | - return static_cast<const _ExtractKey&>(__eboh)
+            | \ __hash_code __code = this->_M_hash_code(__k)
+                | \ _M_hash_code(__key):
+                        | \ _Hash_code_base::_M_hash_code(__key):
+                            | \ return _M_h1()(__key)
+                                | - std::hash()(__key)
+            | \ size_type __bkt = _M_bucket_index(__k, __code)
+                | \ __hash_code_base::_M_bucket_index():
+                    | \ return _M_h2()(__c, __n)
+                        | \ __detail::_Mod_range_hashing::operator()(__num, __den):
+                            | - return __num % __den
+            | \ if: __node_type* __p = _M_find_node(__bkt, __k, __code)
+                | \ _M_find_node(__n, __k, __code):
+                    | - __node_base* __prev_p = _M_buckets[__n]
+                    | \ if: !__prev_p
+                        | - return nulltpr
+                    | \ for: __p <- [static_cast<__node_type*>(__prev_p->_M_nxt), ...) next: __p->_M_next()
+                        | \ if: this->_M_equals(__k, __code, __p)
+                            | - return __prev_p
+                        | \ if: !__p->_M_nxt || _M_bucket_index(__p->_M_next()) != __n
+                            | - break
+                        | - __prev_p = __p
+                    | - return nullptr
+                | - this->_M_deallocate_node(__node)
+                | - return std::make_pair(iterator(__p), false)
+            | \ return std::make_pair(_M_insert_unique_node(__bkt, __code, __node), true)
+                | \ _M_insert_unique_node(__bkt, __code, __node, __n_elt):
+                    | - const __rehash_state& __saved_state = _M_rehash_policy._M_state()
+                    | - std::pair<bool, std::size_t> __do_rehash
+                    |       = _M_rehash_policy._M_need_rehash(_M_bucket_count, _M_element_count, __n_elt)
+                    | \ if: __do_rehash.first
+                        | - _M_rehash(__do_rehash.second, __saved_state)
+                        | -  __bkt = _M_bucket_index(this->_M_extract()(__node->_M_v()), __code)
+                    | - this->_M_store_code(__node, __code)
+                    | \ _M_insert_bucket_begin(__bkt, __node)
+                        | \ if: _M_buckets[__bkt]
+                            | - __node->_M_nxt = _M_buckets[__bkt]->_M_nxt
+                            | - _M_buckets[__bkt]->_M_nxt = __node
+                        | \ else:
+                            | - __node->_M_nxt = _M_before_begin._M_nxt
+                            | - _M_before_begin._M_nxt = __node
+                            | \ if: __node->_M_nxt
+                                | - _M_buckets[_M_bucket_index(__node->_M_next())] = __node
+                            | - _M_buckets[__bkt] = &_M_before_begin
+                    | - ++_M_element_count
+                    | - return iterator(__node)
