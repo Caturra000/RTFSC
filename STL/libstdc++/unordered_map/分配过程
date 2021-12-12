@@ -1,0 +1,11 @@
+--> _Hashtable::_M_allocate_buckets(__n)
+| \ if: __builtin_expect(__n == 1, false)
+    | - _M_single_bucket = nullptr
+    | - return &_M_single_bucket
+| \ return __hashtable_alloc::_M_allocate_buckets(__n)
+    | \ __detail::_Hashtable_alloc::_M_allocate_buckets(__n):
+        | - __bucket_alloc_type __alloc(_M_node_allocator())
+        | - auto __ptr = __bucket_alloc_traits::allocate(__alloc, __n)
+        | - __bucket_type* __p = std::__to_address(__ptr)
+        | - __builtin_memset(__p, 0, __n * sizeof(__bucket_type))
+        | - return __p
