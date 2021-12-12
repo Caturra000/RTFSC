@@ -3,7 +3,7 @@
     | \ return _Hashtable::_M_emplace(__unique_keys(), _Args&&...)
         | \ _Hashtable(std::true_type, _Args&&...):
             | - __node_type* __node = this->_M_allocate_node(_Args&&...)
-            | \ const key_type& __k = this->_M_extract()(__node->_M_v())
+            | \ const key_type& __k = this->_M_extract()(__node->_M_v()) # extract得到first对应的key
                 | \ __detail::_Hash_node::_M_v():
                     | \ return *_M_valptr()
                         | \ return _M_storage._M_ptr()
@@ -12,53 +12,53 @@
                     | \ return __ebo_extract_key::_S_cget(*this)
                         | \ _Hashtable_ebo_helper<0, _ExtractKey>::_S_cget(__eboh):
                             | - return static_cast<const _ExtractKey&>(__eboh)
-            | \ __hash_code __code = this->_M_hash_code(__k)
+            | \ __hash_code __code = this->_M_hash_code(__k) # std::hash()(key)得到code
                 | \ _M_hash_code(__key):
                         | \ _Hash_code_base::_M_hash_code(__key):
                             | \ return _M_h1()(__key)
                                 | - std::hash()(__key)
-            | \ size_type __bkt = _M_bucket_index(__k, __code)
-                | \ _M_bucket_index(__k, __code, _M_bucket_count):
-                    | \ _Hash_code_base::_M_bucket_index(: _Key&, __c, __n):
-                        | \ return _M_h2()(__c, __n)
-                            | \ __detail::_Mod_range_hashing::operator()(__num, __den):
-                                | - return __num % __den
-            | \ if: __node_type* __p = _M_find_node(__bkt, __k, __code)
-                | \ _M_find_node(__n, __k, __code):
-                    | \ __node_base* __before_n = _M_find_before_node(__bkt, __key, __c)
-                        | - __node_base* __prev_p = _M_buckets[__n]
-                        | \ if: !__prev_p
-                            | - return nulltpr
-                        | \ for: __p <- [static_cast<__node_type*>(__prev_p->_M_nxt), ...) next: __p->_M_next()
-                            | \ if: this->_M_equals(__k, __code, __p)
-                                | - return __prev_p
-                            | \ if: !__p->_M_nxt || _M_bucket_index(__p->_M_next()) != __n
-                                | - break
-                            | - __prev_p = __p
-                        | - return nullptr
-                    | \ if: __before_n
-                        | - return static_cast<__node_type*>(__before_n->_M_nxt)
-                    | - return nullptr
-                | - this->_M_deallocate_node(__node)
+            | - size_type __bkt = _M_bucket_index(__k, __code) # 求出code % bucket_count
+            | \ if: __node_type* __p = _M_find_node(__bkt, __k, __code) # bkt既对应的index。如果找到的情况下
+                | - this->_M_deallocate_node(__node) # node在此前已经allocate，因此需要deallocate
                 | - return std::make_pair(iterator(__p), false)
             | \ return std::make_pair(_M_insert_unique_node(__bkt, __code, __node), true)
-                | \ _M_insert_unique_node(__bkt, __code, __node, __n_elt):
+                | \ _M_insert_unique_node(__bkt, __code, __node, __n_elt): ##flag #0
+                    | - param: __n_elt = 1
                     | - const __rehash_state& __saved_state = _M_rehash_policy._M_state()
                     | - std::pair<bool, std::size_t> __do_rehash
                     |       = _M_rehash_policy._M_need_rehash(_M_bucket_count, _M_element_count, __n_elt)
-                    | \ if: __do_rehash.first
+                    | \ if: __do_rehash.first # 如果是第一次触发插入操作，那就是true，且rehash bucket至少为13
                         | - _M_rehash(__do_rehash.second, __saved_state)
                         | -  __bkt = _M_bucket_index(this->_M_extract()(__node->_M_v()), __code)
-                    | - this->_M_store_code(__node, __code)
-                    | \ _M_insert_bucket_begin(__bkt, __node)
-                        | \ if: _M_buckets[__bkt]
+                    | - this->_M_store_code(__node, __code) # node可能直接存放hashcode，这取决于类型萃取
+                    | \ _M_insert_bucket_begin(__bkt, __node) # 插入使用的是头插法，bucket->next为首个element
+                        | \ if: _M_buckets[__bkt] # bucket非空，直接插入，成为bucket->next
                             | - __node->_M_nxt = _M_buckets[__bkt]->_M_nxt
                             | - _M_buckets[__bkt]->_M_nxt = __node
-                        | \ else:
-                            | - __node->_M_nxt = _M_before_begin._M_nxt
-                            | - _M_before_begin._M_nxt = __node
-                            | \ if: __node->_M_nxt
-                                | - _M_buckets[_M_bucket_index(__node->_M_next())] = __node
-                            | - _M_buckets[__bkt] = &_M_before_begin
+                        | \ else: # 对应bucket没有任何element / node
+                            | - __node->_M_nxt = _M_before_begin._M_nxt # 可能本来整个table就没有element，既!before_begin->next
+                            | - _M_before_begin._M_nxt = __node # 头插入before_begin
+                            | \ if: __node->_M_nxt # 指向原有的before_begin->next
+                                | - _M_buckets[_M_bucket_index(__node->_M_next())] = __node # 所有nodes仅一条链表，next不一定在同一bucket内
+                            | - _M_buckets[__bkt] = &_M_before_begin # 这里修改的是bucket，因为所有buckets都是延迟分配的，比如刚allocate时就是空悬状态
                     | - ++_M_element_count
                     | - return iterator(__node)
+
+
+##flag #0
+整个插入过程不考虑rehash的话（这个单独用另一章节说明），就是要理解整个数据结构的布局和_M_before_begin成员
+
+这个hashtable的布局比较独特，buckets是很常规的一段连续内存，但是所有的elements / nodes是只用一条链表来维护（既bucket数目和链表数目是N:1的）
+跨elements的访问只有next接口，因此相同的hashcode对应的nodes总是连续分布的
+buckets类型为Node**，当定位到某bucket对应的index时即为Node* bucket，只用于指向全局链表的某个位置，该位置为对应hashcode首个element
+
+落实到代码里，首个element的表示方式为buckets[index]->next
+至于为啥有next，我觉得是考虑到处理流程上的一致性：如果不使用next，那就难以使用单个链表来维护所有的elements（也不是不能）
+
+那如果本来就是empty状态，那该如何描述？
+那就用before_begin来作为一个哨兵，保证before_begin->next == nullptr即可
+也恰好能用before_begin->next来表示首个element
+
+用单个链表来维护所有elements不一定是好方法
+这样做可能做迭代器全局遍历的时候会有不错的效果
+但是对于node->next是否为同一bucket的判断就显得复杂了：你需要重复求出hashcode来判断是否同一bucket index
