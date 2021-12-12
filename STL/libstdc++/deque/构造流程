@@ -2,16 +2,27 @@
 | \ deque::_Deque_base()
     | \ deque::_Deque_base::_M_impl()
         | - _Tp_alloc_type()
-        | - _M_map(), _M_map_size(0), _M_start(), _M_finish()
-    | \ deque::_Deque_base::_M_initialize_map(0: __num_elements: size_t)
-        | \ __num_nodes = (__num_elements/ __deque_buf_size(sizeof(_Tp)) + 1
+        | - _M_map(), _M_map_size(0), _M_start(), _M_finish() # _M_map仅是一个pointer
+    | \ deque::_Deque_base::_M_initialize_map(0: __num_elements: size_t) ##flag #0
+        | \ __num_nodes = (__num_elements/ __deque_buf_size(sizeof(_Tp)) + 1 # 在deque中，node对应多个elements
             | \ __deque_buf_size(__size):
                 | - return (__size < _GLIBCXX_DEQUE_BUF_SIZE
                 |       ? size_t(_GLIBCXX_DEQUE_BUF_SIZE / __size) : size_t(1))
-        | - this->_M_impl._M_map_size
+        | - this->_M_impl._M_map_size = std::max(_S_initial_map_size, __num_nodes + 2) # _S_initial_map_size为8
         | - this->_M_impl._M_map = _M_allocate_map(this->_M_impl._M_map_size)
-        | - _Map_pointer __nstart, __nfinish
-        | \ _M_create_nodes(__nstart, __nfinish)
+        | - _Map_pointer __nstart, __nfinish # 由于比较长这里省略了赋值流程，总之start和finish是倾向于指向map中间的
+        | \ _M_create_nodes(__nstart, __nfinish) # create仅是allocate
             | \ for: _Map_pointer cur <- [__nstart, __nfinish)
                 | \ *__cur = this->_M_allocate_node()
-                    | - return _Traits::allocate(_M_impl, __deque_buf_size(sizeof(_Tp)))
+                    | - return _Traits::allocate(_M_impl, __deque_buf_size(sizeof(_Tp))) ##flag #1
+
+##flag #0
+构造默认allocate成本：
+- 一般是8个map pointer
+- 至少 1 * deque_buf_size 数目的elements（实际为(finish - start) * deque_buf_size）
+怎么看都很重量级的样子（主要是后者，估计几百个bytes了吧）
+
+##flag #1
+这一小段代码比较绕，需要注意impl用到了EBO
+因此可以展开成这样_M_impl::_Tp_alloc_type().allocate(__deque_buf_size(sizeof(_Tp)))
+既从start开始，共finish - start数目的node，每个node分配__deque_buf_size(sizeof(_Tp))数目的Tp
