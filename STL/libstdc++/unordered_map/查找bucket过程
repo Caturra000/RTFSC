@@ -1,0 +1,6 @@
+--> _Hashtable::_M_bucket_index(__k, __code)
+| \ _M_bucket_index(__k, __code, _M_bucket_count):
+    | \ _Hash_code_base::_M_bucket_index(: _Key&, __c, __n):
+        | \ return _M_h2()(__c, __n)
+            | \ __detail::_Mod_range_hashing::operator()(__num, __den):
+                | - return __num % __den
