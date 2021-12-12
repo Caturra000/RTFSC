@@ -1,0 +1,38 @@
+--> _Hashtable::_RehashPolicy::_M_need_rehash(__n_bkt, __n_elt, __n_ins)
+| \ _Prime_rehash_policy::_M_need_rehash(__n_bkt, __n_elt, __n_ins):
+    | \ if: __n_elt + __n_ins > _M_next_resize
+        | - double __min_bkts = std::max<std::size_t>(__n_elt + __n_ins, _M_next_resize ? 0 : 11)
+        |       / (double)_M_max_load_factor
+        | \ if: __min_bkts >= __n_bkt
+            | - return { true, _M_next_bkt(std::max<std::size_t>(__builtin_floor(__min_bkts) + 1,
+            |       __n_bkt * _S_growth_factor)) }
+        | - _M_next_resize = __builtin_floor(__n_bkt * (double)_M_max_load_factor)
+        | - return { false, 0 }
+    | \ else: return { false, 0 }
+        | - return { false, 0 }
+
+
+--> _Hashtable::_M_rehash(__n, __state)
+| \ _M_rehash_aux(__n, __unique_keys())
+    | - __bucket_type* __new_buckets = _M_allocate_buckets(__n)
+    | \ __node_type* __p = _M_begin()
+        | - return static_cast<__node_type*>(_M_before_begin._M_nxt)
+    | - _M_before_begin._M_nxt = nullptr
+    | - std::size_t __bbegin_bkt = 0
+    | \ while: p
+        | - __next = __p->_M_next()
+        | - __bkt = __hash_code_base::_M_bucket_index(__p, __n)
+        | \ if: !__new_buckets[__bkt]
+            | - __p->_M_nxt = _M_before_begin._M_nxt
+            | - _M_before_begin._M_nxt = __p
+            | - __new_buckets[__bkt] = &_M_before_begin
+            | \ if: __p->_M_nxt
+                | - __new_buckets[__bbegin_bkt] = __p
+            | - __bbegin_bkt = __bkt
+        | \ else:
+            | - __p->_M_nxt = __new_buckets[__bkt]->_M_nxt
+            | - __new_buckets[__bkt]->_M_nxt = __p
+        | - __p = __next
+    | - _M_deallocate_buckets()
+    | - _M_bucket_count = __n
+    | - _M_buckets = __new_buckets
