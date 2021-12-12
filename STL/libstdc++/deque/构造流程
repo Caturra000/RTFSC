@@ -15,7 +15,11 @@
             | \ for: _Map_pointer cur <- [__nstart, __nfinish)
                 | \ *__cur = this->_M_allocate_node()
                     | - return _Traits::allocate(_M_impl, __deque_buf_size(sizeof(_Tp))) ##flag #1
-        | - this->_M_impl._M_start._M_set_node(__nstart)
+        | \ this->_M_impl._M_start._M_set_node(__nstart) ##flag #2
+            | \ _Deque_iterator::_M_set_node(__new_node: _Map_pointer):
+                | - _M_node = __new_node
+                | - _M_first = *__new_node
+                | - _M_last = _M_first + _S_buffer_size()
         | - this->_M_impl._M_finish._M_set_node(__nfinish - 1)
         | - this->_M_impl._M_start._M_cur = _M_impl._M_start._M_first
         | - this->_M_impl._M_finish._M_cur = (this->_M_impl._M_finish._M_first
@@ -31,3 +35,20 @@
 这一小段代码比较绕，需要注意impl用到了EBO
 因此可以展开成这样_M_impl::_Tp_alloc_type().allocate(__deque_buf_size(sizeof(_Tp)))
 既从start开始，共finish - start数目的node，每个node分配__deque_buf_size(sizeof(_Tp))数目的Tp
+
+##flag #2
+关于start, finish
+
+start和finish指的是闭区间，而不是常用的左闭右开形式
+start和finish只是map的一部分，而不是map的全部（这里map指的是_M_impl._M_map）
+因此，deque中会有三段式一样的套路
+- 先判断是否完全在[start, finish]控制范围内
+- 然后判断虽然超出上述范围，但仍在map内
+- 最后才认为已经超出map范围
+
+
+而start, finish都是特殊的iterator，指向node（由于内存布局的不同，并没有复用normal_iterator）
+这种iterator有三个成员first, last, cur
+这三个都指向同一node内的真实element地址
+first和last是左闭右开的[first, last)
+cur是下一个需要构造的element，而不是当前已经存在的element
