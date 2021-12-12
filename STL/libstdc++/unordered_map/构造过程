@@ -1,8 +1,11 @@
---> unordered_map::unordered_map()
+--> unordered_map::unordered_map() # 整个过程很简单，需要注意的是，构造并不会有heap分配，既没有预分配策略
 | \ _M_h{}
-    | - _M_buckets{&_M_single_bucket}
-    | - _M_bucket_count{1}
-    | - _M_before_begin{}
+    | - _M_buckets{&_M_single_bucket} # _M_single_bucket的值为nullptr
+    | - _M_bucket_count{1} # 不允许zero-bucket
+    | \ _M_before_begin{}
+        | \ __node_base():
+            | \ __detail::_Hash_node_base()
+                | - _M_nxt()
     | - _M_element_count{0}
     | \ _M_rehash_policy{_Prime_rehash_policy}
         | - _M_max_load_factor{__z = 1.0}
