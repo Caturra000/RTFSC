@@ -1,14 +1,29 @@
 --> _Hashtable::_RehashPolicy::_M_need_rehash(__n_bkt, __n_elt, __n_ins)
-| \ _Prime_rehash_policy::_M_need_rehash(__n_bkt, __n_elt, __n_ins):
-    | \ if: __n_elt + __n_ins > _M_next_resize
-        | - double __min_bkts = std::max<std::size_t>(__n_elt + __n_ins, _M_next_resize ? 0 : 11)
-        |       / (double)_M_max_load_factor
+| \ _Prime_rehash_policy::_M_need_rehash(__n_bkt, __n_elt, __n_ins): ##flag #0
+    | \ if: __n_elt + __n_ins > _M_next_resize # 现有的elements和需要增加的数大于下一个阈值
+        | - double __min_bkts = std::max<std::size_t>(__n_elt + __n_ins, _M_next_resize ? 0 : 11) ##flag #1
+        |       / (double)_M_max_load_factor # load_factor默认是1
         | \ if: __min_bkts >= __n_bkt
-            | - return { true, _M_next_bkt(std::max<std::size_t>(__builtin_floor(__min_bkts) + 1,
-            |       __n_bkt * _S_growth_factor)) }
+            | \ return { true, _M_next_bkt(std::max<std::size_t>(__builtin_floor(__min_bkts) + 1,
+            |       __n_bkt * _S_growth_factor)) } # _S_growth_factor为2
+                | \ _M_next_bkt(__n):
+                    | - __fast_bkt[] = { 2, 2, 2, 3, 5, 5, 7, 7, 11, 11, 11, 11, 13, 13 }
+                    | \ if: __n < sizeof(__fast_bkt)
+                        | \ if: __n == 0
+                            | - return 1
+                        | - _M_next_resize = __builtin_floor(__fast_bkt[__n] * (double)_M_max_load_factor)
+                        | - return __fast_bkt[__n]
+                    | - __n_primes = sizeof(__prime_list) / sizeof(unsigned long) - 1
+                    | - __last_prime = __prime_list + __n_primes - 1
+                    | - const unsigned long* __next_bkt = std::lower_bound(__prime_list + 6, __last_prime, __n)
+                    | \ if: __next_bkt == __last_prime
+                        | - _M_next_resize = size_t(-1)
+                    | \ else:
+                        | - _M_next_resize = __builtin_floor(*__next_bkt * (double)_M_max_load_factor)
+                    | - return *__next_bkt
         | - _M_next_resize = __builtin_floor(__n_bkt * (double)_M_max_load_factor)
         | - return { false, 0 }
-    | \ else: return { false, 0 }
+    | \ else:
         | - return { false, 0 }
 
 
@@ -36,3 +51,31 @@
     | - _M_deallocate_buckets()
     | - _M_bucket_count = __n
     | - _M_buckets = __new_buckets
+
+
+##flag #0
+返回值是二元组<是否需要rehash，rehash值>
+把判断和求值放在一起处理了
+
+##flag #1
+这里详细描述prime rehash policy下的策略
+
+真正触发rehash的条件为：
+- 现有elements和增长ins数 > next_resize值
+- 且估算min_bkt值 >= 现有buckets数目
+
+next_resize的更新策略：
+- 初始时为0
+- 试探触发rehash条件时更新为 ⌈next_resize * max_load_factor⌉
+- 成功触发rehash条件时更新为 ⌈next_bkt * max_load_factor⌉
+注：
+1. next_bkt见rehash求解过程
+2. 试探触发是指只满足第一个触发rehash条件
+
+返回rehash值求解：
+1. 求出min_bkt估算值：
+    初始阶段：max(现有elements和增长ins数，11)
+    后续阶段：现有elements和增长ins数
+2. 求出next_bkt具体值：
+    求出n = max(min_bkt + 1, 现有buckets * 2)
+    找出与n最接近（lower bound）的素数
