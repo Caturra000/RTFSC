@@ -1,16 +1,17 @@
 --> deque::emplace_back(Args&&...)
-| \ if: this->_M_impl._M_finish._M_cur != this->_M_impl._M_finish._M_last - 1
-    | - _Alloc_traits::construct(this->_M_impl, this->_M_impl._M_finish._M_cur, Args&&...)
+| \ if: this->_M_impl._M_finish._M_cur != this->_M_impl._M_finish._M_last - 1 # finish仍未满，这是node内的流程
+    | - _Alloc_traits::construct(this->_M_impl, this->_M_impl._M_finish._M_cur, Args&&...) ## 使用impl的allocator，往finish.cur调用construct
     | - ++this->_M_impl._M_finish._M_cur
-| \ else:
+| \ else: # 跨node则走aux
     | \ _M_push_back_aux(Args&&...)
         | - if: size() == max_size() then: throw
         | \ _M_reserve_map_at_back()
             | - param: __nodes_to_add = 1
-            | \ if: __nodes_to_add + 1 > this->_M_impl._M_map_size - (this->_M_impl._M_finish._M_node - this->_M_impl._M_map)
+            | \ if: __nodes_to_add + 1 > this->_M_impl._M_map_size -
+            |       (this->_M_impl._M_finish._M_node - this->_M_impl._M_map) # map已经装不下了
                 | - _M_reallocate_map(__nodes_to_add, false)
-        | - *(this->_M_impl._M_finish._M_node + 1) = this->_M_allocate_node()
-        | - _Alloc_traits::construct(this->_M_impl, this->_M_impl._M_finish._M_cur, Args&&...)
+        | - *(this->_M_impl._M_finish._M_node + 1) = this->_M_allocate_node() # 新增node
+        | - _Alloc_traits::construct(this->_M_impl, this->_M_impl._M_finish._M_cur, Args&&...) # cur已经是finish.last - 1
         | - this->_M_impl._M_finish._M_set_node(this->_M_impl._M_finish._M_node + 1)
         | - this->_M_impl._M_finish._M_cur = this->_M_impl._M_finish._M_first
 
