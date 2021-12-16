@@ -7,12 +7,12 @@
     |       + (this->_M_impl._M_map_size - __new_num_nodes) / 2 ##flag #0
     |       + (__add_at_front ? __nodes_to_add : 0)
     | \ if: __new_nstart < this->_M_impl._M_start._M_node # 如果新的start在旧start的前面
-        | - std::copy(this->_M_impl._M_start._M_node,
+        | - std::copy(this->_M_impl._M_start._M_node, ##flag #1
         |       this->_M_impl._M_finish._M_node + 1, __new_nstart)
     | \ else: # 如果新的start在旧start的后面
         | - std::copy_backward(this->_M_impl._M_start._M_node, # 用backward防止错误覆盖
         |       this->_M_impl._M_finish._M_node + 1, __new_nstart + __old_num_nodes)
-| \ else:
+| \ else: ## flag #2
     | - __new_map_size = this->_M_impl._M_map_size +
     |       std::max(this->_M_impl._M_map_size, __nodes_to_add) + 2
     | - __new_map = this->_M_allocate_map(__new_map_size)
@@ -42,3 +42,28 @@
 既然明白了不真正扩容map时候的做法
 后面else其实也一个意思，只不过多了对old map的操作
 完成后也应该是居中对称的状态
+
+
+##flag #1
+我好像在哪看到的说法：
+- deque的emplace_back / push_back是严格O(1)
+- 而vector是均摊O(1)
+
+看到这里，我觉得deque也是均摊吧，
+即使element省了copy/move的环节，node还是要copy
+
+我个人的槽点有3个：
+1. 当element的sizeof足够大的时候，node的copy也是频繁的；如果element的移动语义足够好，
+   那么vector/deque扩容开销基本是一样的，但是deque却要忍受每次操作都要访问两层的屈辱
+2. copy流程居然还是std::copy，我不知道标准库有没有对简单类型进行特化为memcpy/memmove
+3. cppreference对于push_back是写着“复杂度：常数”的，那该让实现者解释一下这个copy流程
+   （对比vector::push_back是“复杂度：均摊常数”）
+
+##flag #2
+扩容只是说它肯定会修改start, finish
+但是map是否会重分配还得看负载因子
+这里的判断就是负载因子是否有超过50%
+
+顺便这里针对flag0还有一个槽点：
+这种居中放置的做法怎么就适合当别人的适配器了？
+如果按照单端插入这种算法，这nodes空间利用率总是塞不满50%（我应该没看错吧？）
