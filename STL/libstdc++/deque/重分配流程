@@ -4,18 +4,41 @@
 | - _Map_pointer __new_nstart
 | \ if: this->_M_impl._M_map_size > 2 * __new_num_nodes
     | - __new_nstart = this->_M_impl._M_map
-    |       + (this->_M_impl._M_map_size - __new_num_nodes) / 2
+    |       + (this->_M_impl._M_map_size - __new_num_nodes) / 2 ##flag #0
     |       + (__add_at_front ? __nodes_to_add : 0)
-    | \ if: __new_nstart < this->_M_impl._M_start._M_node
+    | \ if: __new_nstart < this->_M_impl._M_start._M_node # 如果新的start在旧start的前面
         | - std::copy(this->_M_impl._M_start._M_node,
         |       this->_M_impl._M_finish._M_node + 1, __new_nstart)
-    | \ else:
-        | - std::copy_backward(this->_M_impl._M_start._M_node,
+    | \ else: # 如果新的start在旧start的后面
+        | - std::copy_backward(this->_M_impl._M_start._M_node, # 用backward防止错误覆盖
         |       this->_M_impl._M_finish._M_node + 1, __new_nstart + __old_num_nodes)
 | \ else:
     | - __new_map_size = this->_M_impl._M_map_size +
     |       std::max(this->_M_impl._M_map_size, __nodes_to_add) + 2
+    | - __new_map = this->_M_allocate_map(__new_map_size)
+    | - __new_nstart = __new_map + (__new_map_size - __new_num_nodes) / 2
+    |       + (__add_at_front ? __nodes_to_add : 0)
     | - std::copy(this->_M_impl._M_start._M_node, this->_M_impl._M_finish._M_node + 1, __new_nstart)
     | - _M_deallocate_map(this->_M_impl._M_map, this->_M_impl._M_map_size)
-| - this->_M_impl._M_map = __new_map
-| - this->_M_impl._M_map_size = __new_map_size
+    | - this->_M_impl._M_map = __new_map
+    | - this->_M_impl._M_map_size = __new_map_size
+| - this->_M_impl._M_start._M_set_node(__new_nstart)
+| - this->_M_impl._M_finish._M_set_node(__new_nstart + __old_num_nodes - 1)
+
+##flag #0
+其实没太懂它这里的扩容依据
+但是这个算法的前提是map大小 > 2倍的nodes数目
+如果不看减法，那就是新的start放中间
+但因为减去nodes，所以是往左偏的
+但是考虑到这是一个双端队列的应用，往左偏也只偏nodes一半（__add_at_front == false）
+这样后面__nodes_to_add插入后，又是刚好的[start, finish]对map居中对称
+往前面插也是一个意思
+（一点疑问是，直接/2（向下取整）是真的会均等吗？）
+
+不管怎样，后面还需要比较new start和old start的关系
+比如可能在old的时候，一直push_front，导致old start接近于0
+或者不断push_back
+
+既然明白了不真正扩容map时候的做法
+后面else其实也一个意思，只不过多了对old map的操作
+完成后也应该是居中对称的状态
