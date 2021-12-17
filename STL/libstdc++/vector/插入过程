@@ -1,0 +1,33 @@
+--> vector::emplace_back(Args&&...)
+| \ if: this->_M_impl._M_finish != this->_M_impl._M_end_of_storage
+    | - _Alloc_traits::construct(this->_M_impl, this->_M_impl._M_finish, Args&&...)
+    | - ++this->_M_impl._M_finish;
+| \ else:
+    | \ _M_realloc_insert(end(): __position: iterator, Args&&...)
+        | \ const size_type __len = _M_check_len(size_type(1): __n: size_type, "vector::_M_realloc_insert")
+            | - const size_type __len = size() + (std::max)(size(), __n)
+            | - return (__len < size() || __len > max_size()) ? max_size() : __len
+        | - pointer __old_start = this->_M_impl._M_start
+        | - pointer __old_finish = this->_M_impl._M_finish
+        | - const size_type __elems_before = __position - begin()
+        | - pointer __new_start(this->_M_allocate(__len))
+        | - pointer __new_finish(__new_start)
+        | - _Alloc_traits::construct(this->_M_impl, __new_start + __elems_before, Args&&...)
+        | - __new_finish = pointer()
+        | \ if constexpr: _S_use_relocate()
+            | - __new_finish = _S_relocate(__old_start, __position.base(), __new_start, _M_get_Tp_allocator())
+            | - ++__new_finish
+            | - __new_finish = _S_relocate(__position.base(), __old_finish, __new_finish, _M_get_Tp_allocator())
+        | \ else:
+            | - __new_finish = std::__uninitialized_move_if_noexcept_a(__old_start, __position.base(),
+            |       __new_start, _M_get_Tp_allocator())
+            | - ++__new_finish
+            | - __new_finish = std::__uninitialized_move_if_noexcept_a(__position.base(), __old_finish,
+            |        __new_finish, _M_get_Tp_allocator())
+        | \ if constexpr: !_S_use_relocate()
+            | - std::_Destroy(__old_start, __old_finish, _M_get_Tp_allocator())
+        | - _M_deallocate(__old_start, this->_M_impl._M_end_of_storage - __old_start)
+        | - this->_M_impl._M_start = __new_start;
+        | - this->_M_impl._M_finish = __new_finish;
+        | - this->_M_impl._M_end_of_storage = __new_start + __len;
+| - return back()

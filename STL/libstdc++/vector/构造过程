@@ -1,0 +1,9 @@
+--> vector::vector()
+| \ _Vector_base::_Vector_base()
+    | \ _M_impl{}
+        | \ _Vector_impl::_Vector_impl()
+            | - _Tp_alloc_type::_Tp_alloc_type()
+            | \ _Vector_impl_data::_Vector_impl_data()
+                | - _M_start{}
+                | - _M_finish{}
+                | - _M_end_of_storage{}
