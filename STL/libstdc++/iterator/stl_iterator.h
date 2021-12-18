@@ -1,3 +1,32 @@
+/** @file bits/stl_iterator.h
+ *  This is an internal header file, included by other library headers.
+ *  Do not attempt to use it directly. @headername{iterator}
+ *
+ *  This file implements reverse_iterator, back_insert_iterator,
+ *  front_insert_iterator, insert_iterator, __normal_iterator, and their
+ *  supporting functions and overloaded operators.
+ */
+
+#ifndef _STL_ITERATOR_H
+#define _STL_ITERATOR_H 1
+
+#include <bits/cpp_type_traits.h>
+#include <ext/type_traits.h>
+#include <bits/move.h>
+#include <bits/ptr_traits.h>
+
+#if __cplusplus >= 201103L
+# include <type_traits>
+#endif
+
+#if __cplusplus >= 201703L
+# define __cpp_lib_array_constexpr 201803L
+#endif
+
+namespace std _GLIBCXX_VISIBILITY(default)
+{
+_GLIBCXX_BEGIN_NAMESPACE_VERSION
+
   /**
    * @addtogroup iterators
    * @{
@@ -1210,5 +1239,14 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
     using __iter_to_alloc_t =
     pair<add_const_t<__iter_key_t<_InputIterator>>,
 	 __iter_val_t<_InputIterator>>;
+
+#endif
+
+_GLIBCXX_END_NAMESPACE_VERSION
+} // namespace
+
+#ifdef _GLIBCXX_DEBUG
+# include <debug/stl_iterator.h>
+#endif
 
 #endif
