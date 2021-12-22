@@ -1,3 +1,18 @@
+// normal_iterator用做适配器，使得最常见的指针也可以作为迭代器使用
+// 比如：std::vector::iterator，std::string::iterator
+//
+// 适配只需要添加对应iterator_traits<>
+// 这种实现技巧可以做到：
+// - 不需要对原有类型做出任何修改，符合OCP原则
+// - 甚至non-class也可以支持，不如对指针的支持就是iterator_traits<Tp*>
+// - 允许针对特殊优化场合进行特化处理
+//
+// 另外还有_Container只是作为一个类型区分的标记，也算是种技巧
+// 它保证不同容器下相同的__normal_iterator<_Iterator>不会被认为是同一种迭代器
+// 比如，vector<char>的iterator和basic_string<char>的iterator本质相同，但不可能混用接口
+//
+// 具体实现倒是没什么特别的
+
 namespace __gnu_cxx _GLIBCXX_VISIBILITY(default)
 {
 _GLIBCXX_BEGIN_NAMESPACE_VERSION
