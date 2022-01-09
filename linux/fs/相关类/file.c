@@ -7,8 +7,8 @@ struct file {
 		struct llist_node	fu_llist;
 		struct rcu_head 	fu_rcuhead;
 	} f_u;
-	struct path		f_path;
-	struct inode		*f_inode;	/* cached value */
+	struct path		f_path; // 通过f_path->dentry则可以找到相关联的dentry
+	struct inode		*f_inode;	/* cached value */ // 需要获取inode可以f_path->dentry->d_inode，这个f_inode用的不多
 	const struct file_operations	*f_op;
 
 	/*
