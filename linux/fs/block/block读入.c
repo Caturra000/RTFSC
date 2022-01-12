@@ -2,14 +2,12 @@
 // NOTE：这里的流程经常像二叉树一样的展开，线性的跟踪代码基本没法读（函数名太乱了），因此尝试打上标记
 //       跟踪在IDE里直接ctrl就好了
 
-
+// TL;DR 一个同步调用过程，执行完既把数据保存在buffer_head->b_data
 static inline struct buffer_head *
 sb_bread(struct super_block *sb, sector_t block)
 {
 	return __bread_gfp(sb->s_bdev, block, sb->s_blocksize, __GFP_MOVABLE);
 }
-
-
 
 /**
  *  __bread_gfp() - reads a specified block and returns the bh
