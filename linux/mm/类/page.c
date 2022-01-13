@@ -50,6 +50,14 @@ struct page {
 	 * means the other users of this union MUST NOT use the bit to
 	 * avoid collision and false-positive PageTail().
 	 */
+	// 这里的union是按struct划分模块的
+	// 既 union { struct{}; struct{}; ... };
+	// 涉及到：
+	// - page cache
+	// - slab
+	// - compound page
+	// - page table
+	// - ZONE_DEVICE (?)
 	union {
 		struct {	/* Page cache and anonymous pages */
 			/**
