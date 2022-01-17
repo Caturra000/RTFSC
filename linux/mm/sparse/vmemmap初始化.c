@@ -1,3 +1,6 @@
+// 这里并不关注vmemmap和struct page之间是怎么搭上（虚拟地址的）关系的
+// 只看vmemmap它本身需要的（物理）内存该如何分配
+
 // 文件：/mm/sparse.c
 
 /*
@@ -80,7 +83,9 @@ void __init sparse_init(void)
 static struct page __init *sparse_early_mem_map_alloc(unsigned long pnum)
 {
 	struct page *map;
+	// 虽然没有显式地调用vmemmap，但其实section都在里面
 	struct mem_section *ms = __nr_to_section(pnum);
+	// TODO 查看node id计算过程
 	int nid = sparse_early_nid(ms);
 
 	map = sparse_mem_map_populate(pnum, nid, NULL);
@@ -123,12 +128,14 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
 	int err;
 
 	if (boot_cpu_has(X86_FEATURE_PSE))
+		// TODO
 		err = vmemmap_populate_hugepages(start, end, node, altmap);
 	else if (altmap) {
 		pr_err_once("%s: no cpu support for altmap allocations\n",
 				__func__);
 		err = -ENOMEM;
 	} else
+		// 在5.x中默认走这里
 		err = vmemmap_populate_basepages(start, end, node);
 	if (!err)
 		sync_global_pgds(start, end - 1);
@@ -148,6 +155,9 @@ int __meminit vmemmap_populate_basepages(unsigned long start,
 	pmd_t *pmd;
 	pte_t *pte;
 
+	// 每个页表层级大概做这样的事情：
+	// 1. vmemmap_alloc_block()
+	// 2. 返回值（如pgd）填到对应的表
 	for (; addr < end; addr += PAGE_SIZE) {
 		pgd = vmemmap_pgd_populate(addr, node);
 		if (!pgd)
@@ -200,6 +210,7 @@ static void * __meminit vmemmap_alloc_block_zero(unsigned long size, int node)
 void * __meminit vmemmap_alloc_block(unsigned long size, int node)
 {
 	/* If the main allocator is up use that, fallback to bootmem. */
+	// 这个分支要slab构造完成才能进入
 	if (slab_is_available()) {
 		gfp_t gfp_mask = GFP_KERNEL|__GFP_RETRY_MAYFAIL|__GFP_NOWARN;
 		int order = get_order(size);
@@ -217,6 +228,7 @@ void * __meminit vmemmap_alloc_block(unsigned long size, int node)
 		}
 		return NULL;
 	} else
+		// 再往下就是bootmem模块的事情了
 		return __earlyonly_bootmem_alloc(node, size, size,
 				__pa(MAX_DMA_ADDRESS));
 }
