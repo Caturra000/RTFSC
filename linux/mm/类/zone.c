@@ -4,6 +4,7 @@ struct zone {
 	/* Read-mostly fields */
 
 	/* zone watermarks, access with *_wmark_pages(zone) macros */
+	// 使用的物理内存达到不同的watermark会有不同的处理方式（如内存回收/OOM）
 	unsigned long watermark[NR_WMARK];
 
 	unsigned long nr_reserved_highatomic;
@@ -17,12 +18,15 @@ struct zone {
 	 * recalculated at runtime if the sysctl_lowmem_reserve_ratio sysctl
 	 * changes.
 	 */
+	// 保留的物理内存
 	long lowmem_reserve[MAX_NR_ZONES];
 
 #ifdef CONFIG_NUMA
 	int node;
 #endif
+	// 该zone归属的pglist_data节点
 	struct pglist_data	*zone_pgdat;
+	// PCP相关
 	struct per_cpu_pageset __percpu *pageset;
 
 #ifndef CONFIG_SPARSEMEM
@@ -34,6 +38,7 @@ struct zone {
 #endif /* CONFIG_SPARSEMEM */
 
 	/* zone_start_pfn == zone_start_paddr >> PAGE_SHIFT */
+	// 起始PFN
 	unsigned long		zone_start_pfn;
 
 	/*
@@ -77,6 +82,11 @@ struct zone {
 	 * adjust_managed_page_count() should be used instead of directly
 	 * touching zone->managed_pages and totalram_pages.
 	 */
+	// spanned_pages包含空洞
+	// present_pages不包含空洞
+	// managed_pages由buddy处理（等于present_pages - reserved_pages）
+	// - 其中reserved_pages是bootmem搞出来的
+	// 一般的内存管理看managed_pages足够了
 	unsigned long		managed_pages;
 	unsigned long		spanned_pages;
 	unsigned long		present_pages;
@@ -103,6 +113,7 @@ struct zone {
 	ZONE_PADDING(_pad1_)
 
 	/* free areas of different sizes */
+	// buddy核心
 	struct free_area	free_area[MAX_ORDER];
 
 	/* zone flags, see below */
@@ -148,6 +159,7 @@ struct zone {
 
 	ZONE_PADDING(_pad3_)
 	/* Zone statistics */
+	// 内存统计相关
 	atomic_long_t		vm_stat[NR_VM_ZONE_STAT_ITEMS];
 	atomic_long_t		vm_numa_stat[NR_VM_NUMA_STAT_ITEMS];
 } ____cacheline_internodealigned_in_smp;
