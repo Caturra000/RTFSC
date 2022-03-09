@@ -34,6 +34,7 @@ static struct page *__rmqueue_pcplist(struct zone *zone, int migratetype,
 	do {
 		// pcp已经用完，通过rmqueue_bulk补充
 		if (list_empty(list)) {
+			// 一次性分配batch个页帧
 			pcp->count += rmqueue_bulk(zone, 0,
 					pcp->batch, list,
 					migratetype);
