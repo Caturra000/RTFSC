@@ -11,7 +11,9 @@ static struct page *rmqueue_pcplist(struct zone *preferred_zone,
 	unsigned long flags;
 
 	local_irq_save(flags);
+	// 获取pcp
 	pcp = &this_cpu_ptr(zone->pageset)->pcp;
+	// 对应单页帧空闲链表（free_area[0].free_list）
 	list = &pcp->lists[migratetype];
 	page = __rmqueue_pcplist(zone,  migratetype, pcp, list);
 	if (page) {
@@ -30,6 +32,7 @@ static struct page *__rmqueue_pcplist(struct zone *zone, int migratetype,
 	struct page *page;
 
 	do {
+		// pcp已经用完，通过rmqueue_bulk补充
 		if (list_empty(list)) {
 			pcp->count += rmqueue_bulk(zone, 0,
 					pcp->batch, list,
@@ -59,6 +62,7 @@ static int rmqueue_bulk(struct zone *zone, unsigned int order,
 
 	spin_lock(&zone->lock);
 	for (i = 0; i < count; ++i) {
+		// 这个看正常fast-path中非order==0的流程
 		struct page *page = __rmqueue(zone, order, migratetype);
 		if (unlikely(page == NULL))
 			break;

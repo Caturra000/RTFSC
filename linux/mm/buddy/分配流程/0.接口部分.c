@@ -49,17 +49,23 @@ struct page *alloc_pages_current(gfp_t gfp, unsigned order)
 /*
  * This is the 'heart' of the zoned buddy allocator.
  */
+// preferred_nid：优选的NUMA节点
+// nodemask：允许的NUMA节点列表，如果为NULL则无限制
 struct page *
 __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 							nodemask_t *nodemask)
 {
 	struct page *page;
+	// 用于检查一些条件
 	unsigned int alloc_flags = ALLOC_WMARK_LOW;
 	gfp_t alloc_mask; /* The gfp_t that was actually used for allocation */
+	// 封装页帧请求过程的上下文
 	struct alloc_context ac = { };
 
+	// gfp_allowed_mask会在不同时期（启动早期、正常运行）取不同的值
 	gfp_mask &= gfp_allowed_mask;
 	alloc_mask = gfp_mask;
+	// 填充ac，并修改alloc_mask和alloc_flags
 	if (!prepare_alloc_pages(gfp_mask, order, preferred_nid, nodemask, &ac, &alloc_mask, &alloc_flags))
 		return NULL;
 
@@ -67,6 +73,8 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 
 	/* First allocation attempt */
 	page = get_page_from_freelist(alloc_mask, order, alloc_flags, &ac);
+	// 一般就是从上述fast-path拿到结果，out返回page
+	// 否则就是继续往下走slow-path
 	if (likely(page))
 		goto out;
 
@@ -86,6 +94,7 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	if (unlikely(ac.nodemask != nodemask))
 		ac.nodemask = nodemask;
 
+	// TODO
 	page = __alloc_pages_slowpath(alloc_mask, order, &ac);
 
 out:
