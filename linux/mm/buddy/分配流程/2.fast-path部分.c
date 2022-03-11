@@ -279,6 +279,7 @@ retry:
 			// 为啥要从CMA拿起？
 			page = __rmqueue_cma_fallback(zone, order);
 
+		// 仍然无法拿到分配的页，那就从fallback拿去，如果能成功fallback / steal则再次尝试
 		if (!page && __rmqueue_fallback(zone, order, migratetype))
 			goto retry;
 	}

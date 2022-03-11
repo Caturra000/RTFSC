@@ -24,9 +24,16 @@ __rmqueue_fallback(struct zone *zone, int order, int start_migratetype)
 	 * approximates finding the pageblock with the most free pages, which
 	 * would be too costly to do exactly.
 	 */
+	// 这里是尝试从最大的order开始获取
+	// commiter认为这样能大概率获取到最多的空闲页
+	// 而如果要精确地得到最多页，则要花费更高成本，所以用一种经验上的决策
 	for (current_order = MAX_ORDER - 1; current_order >= order;
 				--current_order) {
 		area = &(zone->free_area[current_order]);
+		// fallback_mt为查表得到的迁移类型，在这里并没有特殊的要求
+		// 只要zone->free_area[current_order].free_list[fallback_mt]不为空就好
+		//
+		// can_steal为true是在有合法fallback_mt的前提下确认要盗取所有页
 		fallback_mt = find_suitable_fallback(area, current_order,
 				start_migratetype, false, &can_steal);
 		if (fallback_mt == -1)
@@ -40,6 +47,8 @@ __rmqueue_fallback(struct zone *zone, int order, int start_migratetype)
 		 * allocation falls back into a different pageblock than this
 		 * one, it won't cause permanent fragmentation.
 		 */
+		// TODO 没太懂为什么一直对MOVABLE区别看待
+		// 难得是一个注释很多的模块，但我还是一头雾水
 		if (!can_steal && start_migratetype == MIGRATE_MOVABLE
 					&& current_order > order)
 			goto find_smallest;
@@ -84,6 +93,12 @@ do_steal:
  * we can steal other freepages all together. This would help to reduce
  * fragmentation due to mixed migratetype pages in one pageblock.
  */
+// 看上面注释，似乎only_stealable是要把全部空闲页都一并盗用了，但这里实现并没看出这个意思？
+// - 如果不设only_stealable，那只要直接查表fallback到的迁移类型，基本都会返回
+// - 否则，还得结合can_steal的意见（can_steal_fallback）才返回，并且这是默认情况
+//
+// - 非默认情况目前只看到有[memory compatction](https://elixir.bootlin.com/linux/v4.18.20/source/mm/compaction.c#L1374)
+// - 此时can_steal就是一个空悬不用的值，感觉这个接口应该拆分为2个更加合适？
 int find_suitable_fallback(struct free_area *area, unsigned int order,
 			int migratetype, bool only_stealable, bool *can_steal)
 {
@@ -108,6 +123,8 @@ int find_suitable_fallback(struct free_area *area, unsigned int order,
 		if (!only_stealable)
 			return fallback_mt;
 
+		// 就目前的steal page流程来看，由于基本都符合!only_stealable，因此这里也不怎会经过
+		// 但是can_steal的结果仍用作于其它流程的参考值，只要这里返回一个有效的迁移类型
 		if (*can_steal)
 			return fallback_mt;
 	}
@@ -155,6 +172,12 @@ static bool can_steal_fallback(unsigned int order, int start_mt)
 	if (order >= pageblock_order)
 		return true;
 
+	// 第一个条件似乎比上面order >= pageblock_order更加放松，显得上述是多余的
+	// 不过注释也说了，上面的条件是肯定能盗用整个pageblock，从代码的角度来说基本不会经常改动
+	// 而这下面的都是启（玄）发（学）式算法
+	// 至于算法为啥这样做我也没懂，先贴上对应的commit，有空结合一下函数前面的注释一块解读
+	// https://github.com/torvalds/linux/commit/fef903efcf0cb9721f3f2da719daec9bbc26f12b
+	// （大意是尽可能拿足够多的page，相对小块则允许RECLAIMABLE和UNMOVABLE无条件盗用以避免MOVABLE被污染？）
 	if (order >= pageblock_order / 2 ||
 		start_mt == MIGRATE_RECLAIMABLE ||
 		start_mt == MIGRATE_UNMOVABLE ||
