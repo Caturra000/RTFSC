@@ -9,6 +9,8 @@ static void __meminit __init_single_page(struct page *page, unsigned long pfn,
 	page_cpupid_reset_last(page);
 
 	INIT_LIST_HEAD(&page->lru);
+// 这个宏见struct page注释
+// 只在非常少数的体系结构中有定义
 #ifdef WANT_PAGE_VIRTUAL
 	/* The shift won't overflow because ZONE_NORMAL is below 4G. */
 	if (!is_highmem_idx(zone))
@@ -23,6 +25,8 @@ static void __meminit __init_single_page(struct page *page, unsigned long pfn,
  * Those architectures should provide their own implementation of "struct page"
  * zeroing by defining this macro in <asm/pgtable.h>.
  */
+// 考虑到小范围的memset可能是低效率的行为
+// kernel允许替换到不同体系下的最优实现
 #ifndef mm_zero_struct_page
 #define mm_zero_struct_page(pp)  ((void)memset((pp), 0, sizeof(struct page)))
 #endif
@@ -61,10 +65,16 @@ static inline void page_mapcount_reset(struct page *page)
 
 
 // 文件：/arch/x86/include/asm/page.h
+// 可以看出pfn（到pa再）到va是一个线性的关系
 #define __va(x)			((void *)((unsigned long)(x)+PAGE_OFFSET))
 
 // 文件：/include/linux/mm.h
 // 前提：#if defined(WANT_PAGE_VIRTUAL)
+// 差不多是对这个地址进行缓存的意思（如果是HIGHMEM的话）
+//
+// 像是线性映射就不一定必须要这个
+// 比如直接从struct page的地址都能一步到位（通过section计算）拿到virtual（不是page结构体本身的地址）
+// 详见__page_to_pfn()（总之拿到pfn一切好说，再套个__va就差不多了，大概。。）
 static inline void set_page_address(struct page *page, void *address)
 {
 	page->virtual = address;
