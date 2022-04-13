@@ -11,7 +11,7 @@ struct malloc_chunk {
   // INTERNAL_SIZE_T：可以简单认为是size_t
   // prev_size是指相邻地址意义上的的前一个（低地址）chunk的大小
   INTERNAL_SIZE_T      mchunk_prev_size;  /* Size of previous chunk (if free).  */
-  // size其实第三位不描述大小，而是用于表示A | M | P状态
+  // size其实低三位不描述大小，而是用于表示A | M | P状态
   // A: non-main arena，当前chunk是否不属于主线程
   // M: from mmap，当前chunk是否来自mmap
   // P: prev-inuse，前一个chunk是否被分配
@@ -42,8 +42,15 @@ struct malloc_chunk {
     size fields also hold bits representing whether chunks are free or
     in use.
 
+    chunk的维护方式称为boundary tag
+    注释中的链接打不开，看作者补充描述的意思是在内存布局的边界两端记录元数据
+    这种方式可以快速合并大量小碎片
+
     An allocated chunk looks like this:
 
+    下面描述的是chunk具体的内存布局
+    返回地址：很经典的操作就是返回地址`mem`是布局内的，而不是顶端位置
+    数据结构：chunk间是连续的，因此一个`chunk`紧接着下一个`nextchunk`
 
     chunk-> +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 	    |             Size of previous chunk, if unallocated (P clear)  |
@@ -69,6 +76,15 @@ nextchunk-> +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     thus at least double-word aligned.
 
     Free chunks are stored in circular doubly-linked lists, and look like this:
+
+    空闲的chunk用循环双向链表维护
+    当空闲的时候，原来被user data覆盖的区域可以用于描述fd和bk（见下图和上面的结构体字段）
+
+    从这一点来看，可以推测malloc接口能接受的最小大小应该是sizeof(fd) + sizeof(bk)
+    不够大的话可能会padding塞满
+
+    update. 下面补充了大小就是always a multiple of two words，最小我猜对了，但为啥总是要两倍字长？
+    我猜测不只是为了对齐（对齐不需要2倍吧），应该是可以满足后续分裂
 
     chunk-> +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 	    |             Size of previous chunk, if unallocated (P clear)  |
@@ -99,6 +115,9 @@ nextchunk-> +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     the size of the previous chunk, and might even get a memory
     addressing fault when trying to do so.
 
+    对于P标志，注意在首个chunck上总是true的
+    如果P为true，则不应该假定它的size
+
     The A (NON_MAIN_ARENA) bit is cleared for chunks on the initial,
     main arena, described by the main_arena variable.  When additional
     threads are spawned, each thread receives its own arena (up to a
@@ -107,6 +126,10 @@ nextchunk-> +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     find the arena for a chunk on such a non-main arena, heap_for_ptr
     performs a bit mask operation and indirection through the ar_ptr
     member of the per-heap header heap_info (see arena.c).
+
+    arena的数目是线程数的常数倍
+    主线程arena存放于libc.so数据段中的main_arena变量
+    TODO heap_for_ptr
 
     Note that the `foot' of the current chunk is actually represented
     as the prev_size of the NEXT chunk. This makes it easier to
