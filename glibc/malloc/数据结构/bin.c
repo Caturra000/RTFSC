@@ -78,6 +78,8 @@ typedef struct malloc_chunk *mbinptr;
    Note: 这里的注释说的应该是特指32位下的，
          回顾chunk.c中提到的multiple of 2 words，
          量级差应该至少是16而不能是8
+   Note: 这里提到的bins index已经考虑了前面说的一个bin实际占用2个数组元素的背景，
+         比如bin1就是定位于bin_at(m, 1)
 
     There is actually a little bit of slop in the numbers in bin_index
     for the sake of speed. This makes no difference elsewhere.
