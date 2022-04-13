@@ -8,9 +8,17 @@
 
 struct malloc_chunk {
 
+  // INTERNAL_SIZE_T：可以简单认为是size_t
+  // prev_size是指相邻地址意义上的的前一个（低地址）chunk的大小
   INTERNAL_SIZE_T      mchunk_prev_size;  /* Size of previous chunk (if free).  */
+  // size其实第三位不描述大小，而是用于表示A | M | P状态
+  // A: non-main arena，当前chunk是否不属于主线程
+  // M: from mmap，当前chunk是否来自mmap
+  // P: prev-inuse，前一个chunk是否被分配
   INTERNAL_SIZE_T      mchunk_size;       /* Size in bytes, including overhead. */
 
+  // fd表示forward，bk表示backward（非物理相邻）
+  // TODO bin维护
   struct malloc_chunk* fd;         /* double links -- used only if free. */
   struct malloc_chunk* bk;
 
