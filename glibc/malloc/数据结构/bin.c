@@ -66,6 +66,8 @@ typedef struct malloc_chunk *mbinptr;
 #define NBINS             128
 
 /* addressing -- note that bin_at(0) does not exist */
+// 这里av的类型为mstate（一个typedef），展开为malloc_state*
+// offsetof和kernel的同一个意思，不过gnu c有内置的__builtin_offsetof(TYPE, MEMBER)实现
 #define bin_at(m, i) \
   (mbinptr) (((char *) &((m)->bins[((i) - 1) * 2]))			      \
              - offsetof (struct malloc_chunk, fd))
