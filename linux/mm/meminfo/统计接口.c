@@ -12,6 +12,8 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	si_swapinfo(&i);
 	committed = percpu_counter_read_positive(&vm_committed_as);
 
+	// 初步认为，NR_FILE_PAGES就是radix tree维护的页数（page cache）
+	// NR_FILE_PAGES = Cached + SwapCached + Buffers
 	cached = global_node_page_state(NR_FILE_PAGES) -
 			total_swapcache_pages() - i.bufferram;
 	if (cached < 0)
