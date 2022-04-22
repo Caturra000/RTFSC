@@ -13,6 +13,12 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	committed = percpu_counter_read_positive(&vm_committed_as);
 
 	// 初步认为，NR_FILE_PAGES就是radix tree维护的页数（page cache）
+	// 关于NR_FILE_PAGES：既然是cache，那应该是file-backed而不是anonymous
+	//
+	// https://lwn.net/Articles/218890/
+	//   The size of the pagecache is the number of file backed
+	//   pages in a zone which is available through NR_FILE_PAGES.
+	//
 	// NR_FILE_PAGES = Cached + SwapCached + Buffers
 	cached = global_node_page_state(NR_FILE_PAGES) -
 			total_swapcache_pages() - i.bufferram;
