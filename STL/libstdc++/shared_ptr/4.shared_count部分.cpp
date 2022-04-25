@@ -251,15 +251,22 @@
       bool
       _M_add_ref_lock_nothrow();
 
+      // ~shared_ptr时的核心流程
       void
       _M_release() noexcept
       {
+        // TODO race-detector的作用？似乎并不生成任何指令
         // Be race-detector-friendly.  For more info see bits/c++config.
         _GLIBCXX_SYNCHRONIZATION_HAPPENS_BEFORE(&_M_use_count);
+
+	// 分别处理use_count和weak_count
+	// 这里使用ACQ_REL
 	if (__gnu_cxx::__exchange_and_add_dispatch(&_M_use_count, -1) == 1)
 	  {
             _GLIBCXX_SYNCHRONIZATION_HAPPENS_AFTER(&_M_use_count);
+	    // 调用可能的custom deleter
 	    _M_dispose();
+	    // 需要保证destory前看到dispose的影响
 	    // There must be a memory barrier between dispose() and destroy()
 	    // to ensure that the effects of dispose() are observed in the
 	    // thread that runs destroy().
@@ -275,6 +282,7 @@
 						       -1) == 1)
               {
                 _GLIBCXX_SYNCHRONIZATION_HAPPENS_AFTER(&_M_weak_count);
+		// delete this
 	        _M_destroy();
               }
 	  }
@@ -302,6 +310,8 @@
 	  }
       }
 
+      // TODO 没太理解，为什么use_count会是relaxed？
+      // 多线程下使用需要调用方考虑ordering，只保证值本身没问题
       long
       _M_get_use_count() const noexcept
       {
@@ -315,6 +325,7 @@
       _Sp_counted_base& operator=(_Sp_counted_base const&) = delete;
 
       // 注意use_count和weak_count的定义
+      // 并没有用到std::atomic，而是typedef int，直接使用c库的atomic完成原子操作
       _Atomic_word  _M_use_count;     // #shared
       _Atomic_word  _M_weak_count;    // #weak + (#shared != 0)
     };
