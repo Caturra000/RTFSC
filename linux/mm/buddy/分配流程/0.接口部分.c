@@ -95,6 +95,7 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 		ac.nodemask = nodemask;
 
 	// TODO
+	// slow-path允许等待和内存回收
 	page = __alloc_pages_slowpath(alloc_mask, order, &ac);
 
 out:
