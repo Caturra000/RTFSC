@@ -277,6 +277,11 @@ retry:
 		if (migratetype == MIGRATE_MOVABLE)
 			// __rmqueue_cma_fallback等同于__rmqueue_smallest(zone, order, MIGRATE_CMA)
 			// 为啥要从CMA拿起？
+			//
+			// 在偶然的机会得知这是CMA机制的一个feature
+			// CMA未被使用时允许拿去干别的事情，提高整体的内存利用率
+			// 但是只允许是MOVABLE（因为要求当使用CMA时，可以迁回并用页表重新映射）
+			// 我认为MOVABLE是不介意自身物理内存起始在哪里的，只要物理上连续就好
 			page = __rmqueue_cma_fallback(zone, order);
 
 		// 仍然无法拿到分配的页，那就从fallback拿去，如果能成功fallback / steal则再次尝试
