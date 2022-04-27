@@ -78,13 +78,19 @@ void *__kmalloc(size_t size, gfp_t flags)
 	void *ret;
 
 	if (unlikely(size > KMALLOC_MAX_CACHE_SIZE))
+		// 调用kmalloc_order()分配，实现上就是找buddy拿
+		// TODO 会加上__GFP_COMP
 		return kmalloc_large(size, flags);
 
+	// 取得与size对应的快速缓存kmem_cache
+	// 如果没标记GFP_DMA，则从kmalloc_caches[]获取
+	// 否则从kmalloc_dma_caches[]获取
 	s = kmalloc_slab(size, flags);
 
 	if (unlikely(ZERO_OR_NULL_PTR(s)))
 		return s;
 
+	// 从快速缓存s中分配对象
 	ret = slab_alloc(s, flags, _RET_IP_);
 
 	trace_kmalloc(_RET_IP_, ret, size, s->size, flags);
@@ -97,6 +103,7 @@ void *__kmalloc(size_t size, gfp_t flags)
 static __always_inline void *slab_alloc(struct kmem_cache *s,
 		gfp_t gfpflags, unsigned long addr)
 {
+	// NUMA_NO_NODE：不限定节点
 	return slab_alloc_node(s, gfpflags, NUMA_NO_NODE, addr);
 }
 
@@ -132,6 +139,7 @@ redo:
 	 * the same cpu. It could be different if CONFIG_PREEMPT so we need
 	 * to check if it is matched or not.
 	 */
+	// Question. 为什么CONFIG_PREEMPT抢占下per cpu的事务ID仍会不同？
 	do {
 		tid = this_cpu_read(s->cpu_slab->tid);
 		c = raw_cpu_ptr(s->cpu_slab);
@@ -158,9 +166,11 @@ redo:
 	object = c->freelist;
 	page = c->page;
 	if (unlikely(!object || !node_match(page, node))) {
+		// 走slow path
 		object = __slab_alloc(s, gfpflags, node, addr, c);
 		stat(s, ALLOC_SLOWPATH);
 	} else {
+		// 获取无锁freelist下的一个对象
 		void *next_object = get_freepointer_safe(s, object);
 
 		/*
@@ -177,6 +187,13 @@ redo:
 		 * against code executing on this cpu *not* from access by
 		 * other cpus.
 		 */
+		// 非常好用的原子操作
+		// 如果本地slab的无锁链表中首个空闲对象仍然是object 且 本地slab的tid不变
+		// 则首个空闲对象更新为next_object，全局tid更新为next_tidt(tid)
+		// 返回true
+		//
+		// 如果为false，说明本地slab上存在并发访问，object可能已被内核其它部分使用
+		// 因此redo重试
 		if (unlikely(!this_cpu_cmpxchg_double(
 				s->cpu_slab->freelist, s->cpu_slab->tid,
 				object, tid,
@@ -185,6 +202,7 @@ redo:
 			note_cmpxchg_failure("slab_alloc", s, tid);
 			goto redo;
 		}
+		// 性能优化操作，next_object预取到硬件高速缓存
 		prefetch_freepointer(s, next_object);
 		stat(s, ALLOC_FASTPATH);
 	}
@@ -222,19 +240,23 @@ static void *___slab_alloc(struct kmem_cache *s, gfp_t gfpflags, int node,
 	void *freelist;
 	struct page *page;
 
+	// 首先还是贪心地尝试找本地slab
+	// 毕竟还可以找常规的page->freelist
 	page = c->page;
+	// 然而本地slab还是没有空闲对象
 	if (!page)
 		goto new_slab;
 redo:
 
 	if (unlikely(!node_match(page, node))) {
 		int searchnode = node;
-
+		// 查找合适的node
 		if (node != NUMA_NO_NODE && !node_present_pages(node))
 			searchnode = node_to_mem_node(node);
 
 		if (unlikely(!node_match(page, searchnode))) {
 			stat(s, ALLOC_NODE_MISMATCH);
+			// 仍然不合适，将本地slab归还到相应的节点partial链表
 			deactivate_slab(s, page, c->freelist, c);
 			goto new_slab;
 		}
@@ -251,10 +273,13 @@ redo:
 	}
 
 	/* must check again c->freelist in case of cpu migration or IRQ */
+	// 再次尝试无锁空闲对象链表
 	freelist = c->freelist;
+	// 贪心成功，走无锁的
 	if (freelist)
 		goto load_freelist;
 
+	// 获取常规空闲对象链表
 	freelist = get_freelist(s, page);
 
 	if (!freelist) {
@@ -262,6 +287,7 @@ redo:
 		stat(s, DEACTIVATE_BYPASS);
 		goto new_slab;
 	}
+	// 决定好了，从常规空闲对象链表获取
 
 	stat(s, ALLOC_REFILL);
 
@@ -278,13 +304,19 @@ load_freelist:
 
 new_slab:
 
+	// 本地partial链表还有残余
 	if (slub_percpu_partial(c)) {
 		page = c->page = slub_percpu_partial(c);
+		// 更新本地partial，然后redo重新来过
 		slub_set_percpu_partial(c, page);
 		stat(s, CPU_PARTIAL_ALLOC);
 		goto redo;
 	}
 
+	// 本地partial链表为空
+	// 可以从节点partial获取slab或者buddy分配slab
+	// 该函数返回时，本地slab和本地partial链表都填补好了
+	// 因此后面一般也走load_freelist流程（除非开debug）
 	freelist = new_slab_objects(s, gfpflags, node, &c);
 
 	if (unlikely(!freelist)) {

@@ -22,7 +22,14 @@ struct kmem_cache_node {
 #endif
 
 #ifdef CONFIG_SLUB
+	// slub只有partial
+	// 在NUMA node内部是全局的
+
+	// slab的数目
 	unsigned long nr_partial;
+	// 节点partial链表，用page->lru维护
+	// - 当kmem_cache_cpu->partial为空时，从这里batching取出若干个slab
+	// - 同样，当kmem_cache_cpu->partial过多时，会回收若干到这里
 	struct list_head partial;
 #ifdef CONFIG_SLUB_DEBUG
 	atomic_long_t nr_slabs;
