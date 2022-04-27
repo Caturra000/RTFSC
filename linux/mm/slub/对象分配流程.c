@@ -140,6 +140,17 @@ redo:
 	 * to check if it is matched or not.
 	 */
 	// Question. 为什么CONFIG_PREEMPT抢占下per cpu的事务ID仍会不同？
+	//
+	// 在旧版本的实现中，tid更新是通过以下方式完成：
+	// 1. 关中断
+	// 2. c = __this_cpu_ptr(s->cpu_slab);
+	// 3. tid = c->tid
+	// 4. 开中断
+	//
+	// 而更新版本5.18的实现中，却只需要读一次：
+	// c = raw_cpu_ptr(s->cpu_slab);
+	// tid = READ_ONCE(c->tid);
+	// 理由是可以放到后面cmpxchg时再验证
 	do {
 		tid = this_cpu_read(s->cpu_slab->tid);
 		c = raw_cpu_ptr(s->cpu_slab);
