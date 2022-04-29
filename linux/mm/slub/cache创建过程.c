@@ -47,6 +47,7 @@ kmem_cache_create_usercopy(const char *name,
 
 	get_online_cpus();
 	get_online_mems();
+	// TODO memcg
 	memcg_get_cache_ids();
 
 	mutex_lock(&slab_mutex);
@@ -76,6 +77,8 @@ kmem_cache_create_usercopy(const char *name,
 		usersize = useroffset = 0;
 
 	if (!usersize)
+		// 尝试使用kmem_cache alias
+		// 如果返回非空，则不必真的创建了
 		s = __kmem_cache_alias(name, size, align, flags, ctor);
 	if (s)
 		goto out_unlock;
@@ -123,6 +126,9 @@ __kmem_cache_alias(const char *name, unsigned int size, unsigned int align,
 	struct kmem_cache *s, *c;
 
 	s = find_mergeable(size, align, flags, name, ctor);
+	// 如果找到
+	// 则修改对应的元数据
+	// 并增加引用计数即可
 	if (s) {
 		s->refcount++;
 
@@ -154,9 +160,13 @@ struct kmem_cache *find_mergeable(unsigned int size, unsigned int align,
 {
 	struct kmem_cache *s;
 
+	// 首先是看当前自身的情况
+
+	// 如果全局控制不允许merge
 	if (slab_nomerge)
 		return NULL;
 
+	// 如果有custom ctor
 	if (ctor)
 		return NULL;
 
@@ -165,25 +175,41 @@ struct kmem_cache *find_mergeable(unsigned int size, unsigned int align,
 	size = ALIGN(size, align);
 	flags = kmem_cache_flags(size, flags, name, NULL);
 
+	// 如果此次创建局部控制不允许merge
 	if (flags & SLAB_NEVER_MERGE)
 		return NULL;
 
+	// 然后是看遍历其它cache的情况
+
+	// 遍历slab_root_caches
+	// 非memcg情况下，slab_root_caches就是(struct list_head) slab_caches
+	// 否则为(struct list_head) slab_root_caches，通过memcg_params.__root_caches_node定位
+	// 有空看下：https://lkml.iu.edu/hypermail/linux/kernel/1701.2/01782.html
 	list_for_each_entry_reverse(s, &slab_root_caches, root_caches_node) {
+		// 可能的情况：
+		// slab_nomerge || (s->flags & SLAB_NEVER_MERGE)
+		// !is_root_cache(s)
+		// s->ctor || s->usersize
+		// bootstrap阶段
 		if (slab_unmergeable(s))
 			continue;
 
+		// 当前申请对象大小太大了
 		if (size > s->size)
 			continue;
 
+		// flags标记不合适
 		if ((flags & SLAB_MERGE_SAME) != (s->flags & SLAB_MERGE_SAME))
 			continue;
 		/*
 		 * Check if alignment is compatible.
 		 * Courtesy of Adrian Drzewiecki
 		 */
+		// 对齐兼容
 		if ((s->size & ~(align - 1)) != s->size)
 			continue;
 
+		// size差距限制在一定范围内
 		if (s->size - size >= sizeof(void *))
 			continue;
 
@@ -209,6 +235,8 @@ static struct kmem_cache *create_cache(const char *name,
 		useroffset = usersize = 0;
 
 	err = -ENOMEM;
+	// 从`kmem_cache`中分配得到kmem_cache对象
+	// 有意思的一点是，cache也是一种object
 	s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
 	if (!s)
 		goto out;
@@ -229,6 +257,7 @@ static struct kmem_cache *create_cache(const char *name,
 		goto out_free_cache;
 
 	s->refcount = 1;
+	// 把当前cache加入到slab_caches
 	list_add(&s->list, &slab_caches);
 	memcg_link_cache(s);
 out:
@@ -242,12 +271,34 @@ out_free_cache:
 	goto out;
 }
 
+// 文件：/include/linux/slab.h
+/*
+ * Shortcuts
+ */
+static inline void *kmem_cache_zalloc(struct kmem_cache *k, gfp_t flags)
+{
+	return kmem_cache_alloc(k, flags | __GFP_ZERO);
+}
+
+
 // 文件：/mm/slub.c
+
+void *kmem_cache_alloc(struct kmem_cache *s, gfp_t gfpflags)
+{
+	// 见对象分配流程
+	void *ret = slab_alloc(s, gfpflags, _RET_IP_);
+
+	trace_kmem_cache_alloc(_RET_IP_, ret, s->object_size,
+				s->size, gfpflags);
+
+	return ret;
+}
 
 int __kmem_cache_create(struct kmem_cache *s, slab_flags_t flags)
 {
 	int err;
 
+	// TODO open流程
 	err = kmem_cache_open(s, flags);
 	if (err)
 		return err;
@@ -297,6 +348,7 @@ static int kmem_cache_open(struct kmem_cache *s, slab_flags_t flags)
 	 * The larger the object size is, the more pages we want on the partial
 	 * list to avoid pounding the page allocator excessively.
 	 */
+	// 设置s->min_partial，内部会限制该字段不超过(MIN_PARTIAL, MAX_PARTIAL)阈值
 	set_min_partial(s, ilog2(s->size) / 2);
 
 	set_cpu_partial(s);
@@ -324,49 +376,4 @@ error:
 		      s->name, s->size, s->size,
 		      oo_order(s->oo), s->offset, (unsigned long)flags);
 	return -EINVAL;
-}
-
-static int init_kmem_cache_nodes(struct kmem_cache *s)
-{
-	int node;
-
-	for_each_node_state(node, N_NORMAL_MEMORY) {
-		struct kmem_cache_node *n;
-
-		if (slab_state == DOWN) {
-			early_kmem_cache_node_alloc(node);
-			continue;
-		}
-		n = kmem_cache_alloc_node(kmem_cache_node,
-						GFP_KERNEL, node);
-
-		if (!n) {
-			free_kmem_cache_nodes(s);
-			return 0;
-		}
-
-		init_kmem_cache_node(n);
-		s->node[node] = n;
-	}
-	return 1;
-}
-
-static inline int alloc_kmem_cache_cpus(struct kmem_cache *s)
-{
-	BUILD_BUG_ON(PERCPU_DYNAMIC_EARLY_SIZE <
-			KMALLOC_SHIFT_HIGH * sizeof(struct kmem_cache_cpu));
-
-	/*
-	 * Must align to double word boundary for the double cmpxchg
-	 * instructions to work; see __pcpu_double_call_return_bool().
-	 */
-	s->cpu_slab = __alloc_percpu(sizeof(struct kmem_cache_cpu),
-				     2 * sizeof(void *));
-
-	if (!s->cpu_slab)
-		return 0;
-
-	init_kmem_cache_cpus(s);
-
-	return 1;
 }
