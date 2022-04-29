@@ -25,13 +25,17 @@ struct kmem_cache {
 	/* Number of per cpu partial objects to keep around */
 	unsigned int cpu_partial;
 #endif
+	// 命名比较独特，高16位存放order，低16位存放objects个数
+	// 见oo_make()函数
 	struct kmem_cache_order_objects oo;
 
 	/* Allocation and freeing of slabs */
 	struct kmem_cache_order_objects max;
 	struct kmem_cache_order_objects min;
+	// GFP标记
 	gfp_t allocflags;	/* gfp flags to use on each alloc */
 	int refcount;		/* Refcount for slab cache destroy */
+	// 对象的构造函数
 	void (*ctor)(void *);
 	unsigned int inuse;		/* Offset to metadata */
 	unsigned int align;		/* Alignment */
@@ -59,6 +63,8 @@ struct kmem_cache {
 	/*
 	 * Defragmentation by allocating from a remote node.
 	 */
+	// TODO 远端节点的反碎片率
+	// 并没有看到实际使用？
 	unsigned int remote_node_defrag_ratio;
 #endif
 
