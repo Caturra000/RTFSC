@@ -97,168 +97,6 @@ static inline void prepare_switch_to(struct task_struct *next)
 }
 
 
-// 文件：/arch/x86/entry/entry_32.S
-/*
- * %eax: prev task
- * %edx: next task
- */
-ENTRY(__switch_to_asm)
-	/*
-	 * Save callee-saved registers
-	 * This must match the order in struct inactive_task_frame
-	 */
-	// TODO struct inactive_task_frame
-	pushl	%ebp
-	pushl	%ebx
-	pushl	%edi
-	pushl	%esi
-
-	/* switch stack */
-	movl	%esp, TASK_threadsp(%eax)
-	movl	TASK_threadsp(%edx), %esp
-
-#ifdef CONFIG_STACKPROTECTOR
-	movl	TASK_stack_canary(%edx), %ebx
-	movl	%ebx, PER_CPU_VAR(stack_canary)+stack_canary_offset
-#endif
-
-#ifdef CONFIG_RETPOLINE
-	/*
-	 * When switching from a shallower to a deeper call stack
-	 * the RSB may either underflow or use entries populated
-	 * with userspace addresses. On CPUs where those concerns
-	 * exist, overwrite the RSB with entries which capture
-	 * speculative execution to prevent attack.
-	 */
-	FILL_RETURN_BUFFER %ebx, RSB_CLEAR_LOOPS, X86_FEATURE_RSB_CTXSW
-#endif
-
-	/* restore callee-saved registers */
-	popl	%esi
-	popl	%edi
-	popl	%ebx
-	popl	%ebp
-
-	jmp	__switch_to
-END(__switch_to_asm)
-
-
-
-// 文件：/arch/x86/kernel/process_32.c
-/*
- *	switch_to(x,y) should switch tasks from x to y.
- *
- * We fsave/fwait so that an exception goes off at the right time
- * (as a call from the fsave or fwait in effect) rather than to
- * the wrong process. Lazy FP saving no longer makes any sense
- * with modern CPU's, and this simplifies a lot of things (SMP
- * and UP become the same).
- *
- * NOTE! We used to use the x86 hardware context switching. The
- * reason for not using it any more becomes apparent when you
- * try to recover gracefully from saved state that is no longer
- * valid (stale segment register values in particular). With the
- * hardware task-switch, there is no way to fix up bad state in
- * a reasonable manner.
- *
- * The fact that Intel documents the hardware task-switching to
- * be slow is a fairly red herring - this code is not noticeably
- * faster. However, there _is_ some room for improvement here,
- * so the performance issues may eventually be a valid point.
- * More important, however, is the fact that this allows us much
- * more flexibility.
- *
- * The return value (in %ax) will be the "prev" task after
- * the task-switch, and shows up in ret_from_fork in entry.S,
- * for example.
- */
-__visible __notrace_funcgraph struct task_struct *
-__switch_to(struct task_struct *prev_p, struct task_struct *next_p)
-{
-	struct thread_struct *prev = &prev_p->thread,
-			     *next = &next_p->thread;
-	struct fpu *prev_fpu = &prev->fpu;
-	struct fpu *next_fpu = &next->fpu;
-	int cpu = smp_processor_id();
-	struct tss_struct *tss = &per_cpu(cpu_tss_rw, cpu);
-
-	/* never put a printk in __switch_to... printk() calls wake_up*() indirectly */
-
-	switch_fpu_prepare(prev_fpu, cpu);
-
-	/*
-	 * Save away %gs. No need to save %fs, as it was saved on the
-	 * stack on entry.  No need to save %es and %ds, as those are
-	 * always kernel segments while inside the kernel.  Doing this
-	 * before setting the new TLS descriptors avoids the situation
-	 * where we temporarily have non-reloadable segments in %fs
-	 * and %gs.  This could be an issue if the NMI handler ever
-	 * used %fs or %gs (it does not today), or if the kernel is
-	 * running inside of a hypervisor layer.
-	 */
-	lazy_save_gs(prev->gs);
-
-	/*
-	 * Load the per-thread Thread-Local Storage descriptor.
-	 */
-	load_TLS(next, cpu);
-
-	/*
-	 * Restore IOPL if needed.  In normal use, the flags restore
-	 * in the switch assembly will handle this.  But if the kernel
-	 * is running virtualized at a non-zero CPL, the popf will
-	 * not restore flags, so it must be done in a separate step.
-	 */
-	if (get_kernel_rpl() && unlikely(prev->iopl != next->iopl))
-		set_iopl_mask(next->iopl);
-
-	/*
-	 * Now maybe handle debug registers and/or IO bitmaps
-	 */
-	if (unlikely(task_thread_info(prev_p)->flags & _TIF_WORK_CTXSW_PREV ||
-		     task_thread_info(next_p)->flags & _TIF_WORK_CTXSW_NEXT))
-		__switch_to_xtra(prev_p, next_p, tss);
-
-	/*
-	 * Leave lazy mode, flushing any hypercalls made here.
-	 * This must be done before restoring TLS segments so
-	 * the GDT and LDT are properly updated, and must be
-	 * done before fpu__restore(), so the TS bit is up
-	 * to date.
-	 */
-	arch_end_context_switch(next_p);
-
-	/*
-	 * Reload esp0 and cpu_current_top_of_stack.  This changes
-	 * current_thread_info().  Refresh the SYSENTER configuration in
-	 * case prev or next is vm86.
-	 */
-	update_sp0(next_p);
-	refresh_sysenter_cs(next);
-	this_cpu_write(cpu_current_top_of_stack,
-		       (unsigned long)task_stack_page(next_p) +
-		       THREAD_SIZE);
-
-	/*
-	 * Restore %gs if needed (which is common)
-	 */
-	if (prev->gs | next->gs)
-		lazy_load_gs(next->gs);
-
-	switch_fpu_finish(next_fpu, cpu);
-
-	this_cpu_write(current_task, next_p);
-
-	/* Load the Intel cache allocation PQR MSR. */
-	intel_rdt_sched_in();
-
-	return prev_p;
-}
-
-
-
-
-
 // 文件：/arch/x86/entry/entry_64.S
 /*
  * %rdi: prev task
@@ -307,3 +145,244 @@ ENTRY(__switch_to_asm)
 
 	jmp	__switch_to
 END(__switch_to_asm)
+
+
+// 文件：/arch/x86/kernel/process_64.c
+/*
+ *	switch_to(x,y) should switch tasks from x to y.
+ *
+ * This could still be optimized:
+ * - fold all the options into a flag word and test it with a single test.
+ * - could test fs/gs bitsliced
+ *
+ * Kprobes not supported here. Set the probe on schedule instead.
+ * Function graph tracer not supported too.
+ */
+__visible __notrace_funcgraph struct task_struct *
+__switch_to(struct task_struct *prev_p, struct task_struct *next_p)
+{
+	struct thread_struct *prev = &prev_p->thread;
+	struct thread_struct *next = &next_p->thread;
+	struct fpu *prev_fpu = &prev->fpu;
+	struct fpu *next_fpu = &next->fpu;
+	int cpu = smp_processor_id();
+	struct tss_struct *tss = &per_cpu(cpu_tss_rw, cpu);
+
+	WARN_ON_ONCE(IS_ENABLED(CONFIG_DEBUG_ENTRY) &&
+		     this_cpu_read(irq_count) != -1);
+
+	switch_fpu_prepare(prev_fpu, cpu);
+
+	/* We must save %fs and %gs before load_TLS() because
+	 * %fs and %gs may be cleared by load_TLS().
+	 *
+	 * (e.g. xen_load_tls())
+	 */
+	save_fsgs(prev_p);
+
+	/*
+	 * Load TLS before restoring any segments so that segment loads
+	 * reference the correct GDT entries.
+	 */
+	load_TLS(next, cpu);
+
+	/*
+	 * Leave lazy mode, flushing any hypercalls made here.  This
+	 * must be done after loading TLS entries in the GDT but before
+	 * loading segments that might reference them, and and it must
+	 * be done before fpu__restore(), so the TS bit is up to
+	 * date.
+	 */
+	arch_end_context_switch(next_p);
+
+	/* Switch DS and ES.
+	 *
+	 * Reading them only returns the selectors, but writing them (if
+	 * nonzero) loads the full descriptor from the GDT or LDT.  The
+	 * LDT for next is loaded in switch_mm, and the GDT is loaded
+	 * above.
+	 *
+	 * We therefore need to write new values to the segment
+	 * registers on every context switch unless both the new and old
+	 * values are zero.
+	 *
+	 * Note that we don't need to do anything for CS and SS, as
+	 * those are saved and restored as part of pt_regs.
+	 */
+	savesegment(es, prev->es);
+	if (unlikely(next->es | prev->es))
+		loadsegment(es, next->es);
+
+	savesegment(ds, prev->ds);
+	if (unlikely(next->ds | prev->ds))
+		loadsegment(ds, next->ds);
+
+	load_seg_legacy(prev->fsindex, prev->fsbase,
+			next->fsindex, next->fsbase, FS);
+	load_seg_legacy(prev->gsindex, prev->gsbase,
+			next->gsindex, next->gsbase, GS);
+
+	switch_fpu_finish(next_fpu, cpu);
+
+	/*
+	 * Switch the PDA and FPU contexts.
+	 */
+	this_cpu_write(current_task, next_p);
+	this_cpu_write(cpu_current_top_of_stack, task_top_of_stack(next_p));
+
+	/* Reload sp0. */
+	update_sp0(next_p);
+
+	/*
+	 * Now maybe reload the debug registers and handle I/O bitmaps
+	 */
+	if (unlikely(task_thread_info(next_p)->flags & _TIF_WORK_CTXSW_NEXT ||
+		     task_thread_info(prev_p)->flags & _TIF_WORK_CTXSW_PREV))
+		__switch_to_xtra(prev_p, next_p, tss);
+
+#ifdef CONFIG_XEN_PV
+	/*
+	 * On Xen PV, IOPL bits in pt_regs->flags have no effect, and
+	 * current_pt_regs()->flags may not match the current task's
+	 * intended IOPL.  We need to switch it manually.
+	 */
+	if (unlikely(static_cpu_has(X86_FEATURE_XENPV) &&
+		     prev->iopl != next->iopl))
+		xen_set_iopl_mask(next->iopl);
+#endif
+
+	if (static_cpu_has_bug(X86_BUG_SYSRET_SS_ATTRS)) {
+		/*
+		 * AMD CPUs have a misfeature: SYSRET sets the SS selector but
+		 * does not update the cached descriptor.  As a result, if we
+		 * do SYSRET while SS is NULL, we'll end up in user mode with
+		 * SS apparently equal to __USER_DS but actually unusable.
+		 *
+		 * The straightforward workaround would be to fix it up just
+		 * before SYSRET, but that would slow down the system call
+		 * fast paths.  Instead, we ensure that SS is never NULL in
+		 * system call context.  We do this by replacing NULL SS
+		 * selectors at every context switch.  SYSCALL sets up a valid
+		 * SS, so the only way to get NULL is to re-enter the kernel
+		 * from CPL 3 through an interrupt.  Since that can't happen
+		 * in the same task as a running syscall, we are guaranteed to
+		 * context switch between every interrupt vector entry and a
+		 * subsequent SYSRET.
+		 *
+		 * We read SS first because SS reads are much faster than
+		 * writes.  Out of caution, we force SS to __KERNEL_DS even if
+		 * it previously had a different non-NULL value.
+		 */
+		unsigned short ss_sel;
+		savesegment(ss, ss_sel);
+		if (ss_sel != __KERNEL_DS)
+			loadsegment(ss, __KERNEL_DS);
+	}
+
+	/* Load the Intel cache allocation PQR MSR. */
+	intel_rdt_sched_in();
+
+	return prev_p;
+}
+
+
+// 文件：/kernel/sched/core.c
+/**
+ * finish_task_switch - clean up after a task-switch
+ * @prev: the thread we just switched away from.
+ *
+ * finish_task_switch must be called after the context switch, paired
+ * with a prepare_task_switch call before the context switch.
+ * finish_task_switch will reconcile locking set up by prepare_task_switch,
+ * and do any other architecture-specific cleanup actions.
+ *
+ * Note that we may have delayed dropping an mm in context_switch(). If
+ * so, we finish that here outside of the runqueue lock. (Doing it
+ * with the lock held can cause deadlocks; see schedule() for
+ * details.)
+ *
+ * The context switch have flipped the stack from under us and restored the
+ * local variables which were saved when this task called schedule() in the
+ * past. prev == current is still correct but we need to recalculate this_rq
+ * because prev may have moved to another CPU.
+ */
+static struct rq *finish_task_switch(struct task_struct *prev)
+	__releases(rq->lock)
+{
+	struct rq *rq = this_rq();
+	struct mm_struct *mm = rq->prev_mm;
+	long prev_state;
+
+	/*
+	 * The previous task will have left us with a preempt_count of 2
+	 * because it left us after:
+	 *
+	 *	schedule()
+	 *	  preempt_disable();			// 1
+	 *	  __schedule()
+	 *	    raw_spin_lock_irq(&rq->lock)	// 2
+	 *
+	 * Also, see FORK_PREEMPT_COUNT.
+	 */
+	if (WARN_ONCE(preempt_count() != 2*PREEMPT_DISABLE_OFFSET,
+		      "corrupted preempt_count: %s/%d/0x%x\n",
+		      current->comm, current->pid, preempt_count()))
+		preempt_count_set(FORK_PREEMPT_COUNT);
+
+	rq->prev_mm = NULL;
+
+	/*
+	 * A task struct has one reference for the use as "current".
+	 * If a task dies, then it sets TASK_DEAD in tsk->state and calls
+	 * schedule one last time. The schedule call will never return, and
+	 * the scheduled task must drop that reference.
+	 *
+	 * We must observe prev->state before clearing prev->on_cpu (in
+	 * finish_task), otherwise a concurrent wakeup can get prev
+	 * running on another CPU and we could rave with its RUNNING -> DEAD
+	 * transition, resulting in a double drop.
+	 */
+	prev_state = prev->state;
+	vtime_task_switch(prev);
+	perf_event_task_sched_in(prev, current);
+	finish_task(prev);
+	finish_lock_switch(rq);
+	finish_arch_post_lock_switch();
+	kcov_finish_switch(current);
+
+	fire_sched_in_preempt_notifiers(current);
+	/*
+	 * When switching through a kernel thread, the loop in
+	 * membarrier_{private,global}_expedited() may have observed that
+	 * kernel thread and not issued an IPI. It is therefore possible to
+	 * schedule between user->kernel->user threads without passing though
+	 * switch_mm(). Membarrier requires a barrier after storing to
+	 * rq->curr, before returning to userspace, so provide them here:
+	 *
+	 * - a full memory barrier for {PRIVATE,GLOBAL}_EXPEDITED, implicitly
+	 *   provided by mmdrop(),
+	 * - a sync_core for SYNC_CORE.
+	 */
+	if (mm) {
+		membarrier_mm_sync_core_before_usermode(mm);
+		mmdrop(mm);
+	}
+	if (unlikely(prev_state == TASK_DEAD)) {
+		if (prev->sched_class->task_dead)
+			prev->sched_class->task_dead(prev);
+
+		/*
+		 * Remove function-return probe instances associated with this
+		 * task and put them back on the free list.
+		 */
+		kprobe_flush_task(prev);
+
+		/* Task is done with its stack. */
+		put_task_stack(prev);
+
+		put_task_struct(prev);
+	}
+
+	tick_nohz_task_switch();
+	return rq;
+}
