@@ -1,4 +1,6 @@
 // 文件：/fs/minix/inode.c
+
+// 将文件内部的块编号block转换为全局的逻辑块编号
 static int minix_get_block(struct inode *inode, sector_t block,
 		    struct buffer_head *bh_result, int create)
 {
@@ -21,8 +23,13 @@ static int get_block(struct inode * inode, sector_t block,
 			struct buffer_head *bh, int create)
 {
 	int err = -EIO;
+	// offsets[0]为inode内的下标
+	// 其余的是间接块block的下标
+	// 比如block==5，那么offset[0]就是5，即可定位到izone[5]然后拿到直接块
 	int offsets[DEPTH];
+	// 用于算出最终的结果
 	Indirect chain[DEPTH];
+	// 记录断链情况（比如间接块寻址没法完成），空指针则表示为完整链路
 	Indirect *partial;
 	int left;
 	// 根据block号求出各层offset
@@ -47,6 +54,7 @@ got_it:
 	}
 
 	/* Next simple case - plain lookup or failed read of indirect block */
+	// 如果是read流程，那么出现问题是不会create的，而是上报err结束
 	if (!create || err == -EIO) {
 cleanup:
 		while (partial > chain) {
