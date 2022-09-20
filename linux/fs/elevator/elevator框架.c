@@ -27,6 +27,8 @@ int elevator_init(struct request_queue *q)
 	if (unlikely(q->elevator))
 		goto out_unlock;
 
+	// 根据字符串chosen_elevator来获取elevator_type实例
+	// 实际上会从静态变量elv_list中遍历获取，过程没啥意思
 	if (*chosen_elevator) {
 		e = elevator_get(q, chosen_elevator, false);
 		if (!e)
@@ -43,6 +45,7 @@ int elevator_init(struct request_queue *q)
 	}
 
 	// 取决于elevator算法
+	// 通常是初始化具体实现用到的私有数据
 	err = e->ops.sq.elevator_init_fn(q, e);
 	if (err)
 		elevator_put(e);
@@ -86,13 +89,17 @@ void blk_queue_make_request(struct request_queue *q, make_request_fn *mfn)
 	/*
 	 * set defaults
 	 */
+	// blkdev中该值设为128（Max # of requests）
 	q->nr_requests = BLKDEV_MAX_RQ;
 
 	q->make_request_fn = mfn;
 	blk_queue_dma_alignment(q, 511);
 	blk_queue_congestion_threshold(q);
+	// BLK_BATCH_REQ为32（Number of requests a "batching" process may submit）
 	q->nr_batching = BLK_BATCH_REQ;
 
+	// queue_limits调参
+	// 这种需要参考硬件特性
 	blk_set_default_limits(&q->limits);
 }
 
