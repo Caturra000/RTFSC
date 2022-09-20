@@ -1,4 +1,14 @@
+// 框架上关注以下流程：
+// - 初始化
+// - 合并bio请求
+// - 插入请求到调度队列
+// - 派发请求到派发队列
+
+// 目前仍然只追踪单队列流程
+
+
 // 文件：/block/elevator.c
+// 初始化流程
 /*
  * Use the default elevator specified by config boot param for non-mq devices,
  * or by config option.  Don't try to load modules as we could be running off
@@ -32,6 +42,7 @@ int elevator_init(struct request_queue *q)
 		e = elevator_get(q, "noop", false);
 	}
 
+	// 取决于elevator算法
 	err = e->ops.sq.elevator_init_fn(q, e);
 	if (err)
 		elevator_put(e);
@@ -43,7 +54,11 @@ out_unlock:
 
 
 
+// 合并bio是提交IO时执行的
+// 见generic_make_request及make_request_fn
+
 // 文件：/block/blk-settings.c
+// 而make_request_fn注册流程为
 /**
  * blk_queue_make_request - define an alternate make_request function for a device
  * @q:  the request queue for the device to be affected
@@ -83,6 +98,7 @@ void blk_queue_make_request(struct request_queue *q, make_request_fn *mfn)
 
 // 文件：/block/blk-core.c
 
+// 这里注册了blk_queue_bio
 int blk_init_allocated_queue(struct request_queue *q)
 {
 	WARN_ON_ONCE(q->mq_ops);
@@ -120,6 +136,10 @@ out_free_flush_queue:
 	return -ENOMEM;
 }
 
+// 在这里发生bio合并
+// 会先尝试合并到plug list里面合适的request
+// 然后尝试合并到调度队列中的request
+// 最后才构造新的request并插入（如果有蓄流就插入plug list）
 static blk_qc_t blk_queue_bio(struct request_queue *q, struct bio *bio)
 {
 	struct blk_plug *plug;
