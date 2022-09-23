@@ -292,6 +292,13 @@ out_unlock:
 ////////////////////////////// 插入请求
 
 // 文件：/block/elevator.c
+// 具体的插入流程，主要被blk_flush_plug_list调用
+// 会在plug list满时执行
+// 主要是把plug list上的rq转移到调度队列q
+//
+// 在这个主要被调用的流程中
+// 通常设置where = ELEVATOR_INSERT_SORT_MERGE
+// 除非REQ_FUA（forced unit access）或者REQ_PREFLUSH（request for cache flush），则where = ELEVATOR_INSERT_FLUSH
 void __elv_add_request(struct request_queue *q, struct request *rq, int where)
 {
 	trace_block_rq_insert(q, rq);
@@ -335,20 +342,31 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)
 		__blk_run_queue(q);
 		break;
 
+	// 尝试将请求rq再次和调度队列q里面的请求合并
 	case ELEVATOR_INSERT_SORT_MERGE:
 		/*
 		 * If we succeed in merging this request with one in the
 		 * queue already, we are done - rq has now been freed,
 		 * so no need to do anything further.
 		 */
+		// 如果成功，那么结束流程
+		//
+		// 这个过程比较复杂，大概过一眼
+		// 会寻找q->last_merge和hash中的request来作为合并对象
+		// 然后attempt_merge判断是否可合并、是否相同操作类型、flag是否合适等待
+		// 如果可以则back merge
 		if (elv_attempt_insert_merge(q, rq))
 			break;
 		/* fall through */
+		// 否则继续往下走，插入队列排序
 	case ELEVATOR_INSERT_SORT:
 		BUG_ON(blk_rq_is_passthrough(rq));
 		rq->rq_flags |= RQF_SORTED;
 		q->nr_sorted++;
 		if (rq_mergeable(rq)) {
+			// 从q拿到elevator_queue
+			// 往后者的hash中添加rq->hash
+			// rq->rq_flags也打上hash相关标记
 			elv_rqhash_add(q, rq);
 			if (!q->last_merge)
 				q->last_merge = rq;
@@ -359,6 +377,7 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)
 		 * rq cannot be accessed after calling
 		 * elevator_add_req_fn.
 		 */
+		// elevator接口
 		q->elevator->type->ops.sq.elevator_add_req_fn(q, rq);
 		break;
 
