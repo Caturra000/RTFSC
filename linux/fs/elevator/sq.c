@@ -1,14 +1,17 @@
+// elevator框架，单队列（single queue）实现
+
 // 框架上关注以下流程：
 // - 初始化
 // - 合并bio请求
 // - 插入请求到调度队列
 // - 派发请求到派发队列
 
-// 目前仍然只追踪单队列流程
+
+
+////////////////////////////// 初始化流程
 
 
 // 文件：/block/elevator.c
-// 初始化流程
 /*
  * Use the default elevator specified by config boot param for non-mq devices,
  * or by config option.  Don't try to load modules as we could be running off
@@ -54,6 +57,11 @@ out_unlock:
 	return err;
 }
 
+
+
+
+
+////////////////////////////// 合并bio
 
 
 
@@ -162,6 +170,8 @@ static blk_qc_t blk_queue_bio(struct request_queue *q, struct bio *bio)
 	 */
 	blk_queue_bounce(q, &bio);
 
+	// bio split操作
+	// 如果不支持scatter IO，则需要拆分bio
 	blk_queue_split(q, &bio);
 
 	if (!bio_integrity_prep(bio))
@@ -177,7 +187,9 @@ static blk_qc_t blk_queue_bio(struct request_queue *q, struct bio *bio)
 	 * Check if we can merge with the plugged list before grabbing
 	 * any locks.
 	 */
+	// 测试qflags QUEUE_FLAG_NOMERGES（由driver给出），如果条件允许就尝试插入plug list
 	if (!blk_queue_nomerges(q)) {
+		// request_count: number of traversed plugged requests
 		if (blk_attempt_plug_merge(q, bio, &request_count, NULL))
 			return BLK_QC_T_NONE;
 	} else
@@ -256,6 +268,7 @@ get_rq:
 			trace_block_plug(q);
 		else {
 			struct request *last = list_entry_rq(plug->list.prev);
+			// request个数或者bytes总数超过阈值时，执行同步unplug
 			if (request_count >= BLK_MAX_REQUEST_COUNT ||
 			    blk_rq_bytes(last) >= BLK_PLUG_FLUSH_SIZE) {
 				blk_flush_plug_list(plug, false);
@@ -273,4 +286,244 @@ out_unlock:
 	}
 
 	return BLK_QC_T_NONE;
+}
+
+
+////////////////////////////// 插入请求
+
+// 文件：/block/elevator.c
+void __elv_add_request(struct request_queue *q, struct request *rq, int where)
+{
+	trace_block_rq_insert(q, rq);
+
+	blk_pm_add_request(q, rq);
+
+	rq->q = q;
+
+	if (rq->rq_flags & RQF_SOFTBARRIER) {
+		/* barriers are scheduling boundary, update end_sector */
+		if (!blk_rq_is_passthrough(rq)) {
+			q->end_sector = rq_end_sector(rq);
+			q->boundary_rq = rq;
+		}
+	} else if (!(rq->rq_flags & RQF_ELVPRIV) &&
+		    (where == ELEVATOR_INSERT_SORT ||
+		     where == ELEVATOR_INSERT_SORT_MERGE))
+		where = ELEVATOR_INSERT_BACK;
+
+	switch (where) {
+	case ELEVATOR_INSERT_REQUEUE:
+	case ELEVATOR_INSERT_FRONT:
+		rq->rq_flags |= RQF_SOFTBARRIER;
+		list_add(&rq->queuelist, &q->queue_head);
+		break;
+
+	case ELEVATOR_INSERT_BACK:
+		rq->rq_flags |= RQF_SOFTBARRIER;
+		elv_drain_elevator(q);
+		list_add_tail(&rq->queuelist, &q->queue_head);
+		/*
+		 * We kick the queue here for the following reasons.
+		 * - The elevator might have returned NULL previously
+		 *   to delay requests and returned them now.  As the
+		 *   queue wasn't empty before this request, ll_rw_blk
+		 *   won't run the queue on return, resulting in hang.
+		 * - Usually, back inserted requests won't be merged
+		 *   with anything.  There's no point in delaying queue
+		 *   processing.
+		 */
+		__blk_run_queue(q);
+		break;
+
+	case ELEVATOR_INSERT_SORT_MERGE:
+		/*
+		 * If we succeed in merging this request with one in the
+		 * queue already, we are done - rq has now been freed,
+		 * so no need to do anything further.
+		 */
+		if (elv_attempt_insert_merge(q, rq))
+			break;
+		/* fall through */
+	case ELEVATOR_INSERT_SORT:
+		BUG_ON(blk_rq_is_passthrough(rq));
+		rq->rq_flags |= RQF_SORTED;
+		q->nr_sorted++;
+		if (rq_mergeable(rq)) {
+			elv_rqhash_add(q, rq);
+			if (!q->last_merge)
+				q->last_merge = rq;
+		}
+
+		/*
+		 * Some ioscheds (cfq) run q->request_fn directly, so
+		 * rq cannot be accessed after calling
+		 * elevator_add_req_fn.
+		 */
+		q->elevator->type->ops.sq.elevator_add_req_fn(q, rq);
+		break;
+
+	case ELEVATOR_INSERT_FLUSH:
+		rq->rq_flags |= RQF_SOFTBARRIER;
+		blk_insert_flush(rq);
+		break;
+	default:
+		printk(KERN_ERR "%s: bad insertion point %d\n",
+		       __func__, where);
+		BUG();
+	}
+}
+
+
+
+
+
+////////////////////////////// 派发请求
+
+
+
+
+
+// 文件：/block/blk-core.c
+
+/**
+ * blk_peek_request - peek at the top of a request queue
+ * @q: request queue to peek at
+ *
+ * Description:
+ *     Return the request at the top of @q.  The returned request
+ *     should be started using blk_start_request() before LLD starts
+ *     processing it.
+ *
+ * Return:
+ *     Pointer to the request at the top of @q if available.  Null
+ *     otherwise.
+ */
+struct request *blk_peek_request(struct request_queue *q)
+{
+	struct request *rq;
+	int ret;
+
+	lockdep_assert_held(q->queue_lock);
+	WARN_ON_ONCE(q->mq_ops);
+
+	while ((rq = elv_next_request(q)) != NULL) {
+		if (!(rq->rq_flags & RQF_STARTED)) {
+			/*
+			 * This is the first time the device driver
+			 * sees this request (possibly after
+			 * requeueing).  Notify IO scheduler.
+			 */
+			if (rq->rq_flags & RQF_SORTED)
+				elv_activate_rq(q, rq);
+
+			/*
+			 * just mark as started even if we don't start
+			 * it, a request that has been delayed should
+			 * not be passed by new incoming requests
+			 */
+			rq->rq_flags |= RQF_STARTED;
+			trace_block_rq_issue(q, rq);
+		}
+
+		if (!q->boundary_rq || q->boundary_rq == rq) {
+			q->end_sector = rq_end_sector(rq);
+			q->boundary_rq = NULL;
+		}
+
+		if (rq->rq_flags & RQF_DONTPREP)
+			break;
+
+		if (q->dma_drain_size && blk_rq_bytes(rq)) {
+			/*
+			 * make sure space for the drain appears we
+			 * know we can do this because max_hw_segments
+			 * has been adjusted to be one fewer than the
+			 * device can handle
+			 */
+			rq->nr_phys_segments++;
+		}
+
+		if (!q->prep_rq_fn)
+			break;
+
+		ret = q->prep_rq_fn(q, rq);
+		if (ret == BLKPREP_OK) {
+			break;
+		} else if (ret == BLKPREP_DEFER) {
+			/*
+			 * the request may have been (partially) prepped.
+			 * we need to keep this request in the front to
+			 * avoid resource deadlock.  RQF_STARTED will
+			 * prevent other fs requests from passing this one.
+			 */
+			if (q->dma_drain_size && blk_rq_bytes(rq) &&
+			    !(rq->rq_flags & RQF_DONTPREP)) {
+				/*
+				 * remove the space for the drain we added
+				 * so that we don't add it again
+				 */
+				--rq->nr_phys_segments;
+			}
+
+			rq = NULL;
+			break;
+		} else if (ret == BLKPREP_KILL || ret == BLKPREP_INVALID) {
+			rq->rq_flags |= RQF_QUIET;
+			/*
+			 * Mark this request as started so we don't trigger
+			 * any debug logic in the end I/O path.
+			 */
+			blk_start_request(rq);
+			__blk_end_request_all(rq, ret == BLKPREP_INVALID ?
+					BLK_STS_TARGET : BLK_STS_IOERR);
+		} else {
+			printk(KERN_ERR "%s: bad return=%d\n", __func__, ret);
+			break;
+		}
+	}
+
+	return rq;
+}
+
+
+static struct request *elv_next_request(struct request_queue *q)
+{
+	struct request *rq;
+	struct blk_flush_queue *fq = blk_get_flush_queue(q, NULL);
+
+	WARN_ON_ONCE(q->mq_ops);
+
+	while (1) {
+		list_for_each_entry(rq, &q->queue_head, queuelist) {
+			if (blk_pm_allow_request(rq))
+				return rq;
+
+			if (rq->rq_flags & RQF_SOFTBARRIER)
+				break;
+		}
+
+		/*
+		 * Flush request is running and flush request isn't queueable
+		 * in the drive, we can hold the queue till flush request is
+		 * finished. Even we don't do this, driver can't dispatch next
+		 * requests and will requeue them. And this can improve
+		 * throughput too. For example, we have request flush1, write1,
+		 * flush 2. flush1 is dispatched, then queue is hold, write1
+		 * isn't inserted to queue. After flush1 is finished, flush2
+		 * will be dispatched. Since disk cache is already clean,
+		 * flush2 will be finished very soon, so looks like flush2 is
+		 * folded to flush1.
+		 * Since the queue is hold, a flag is set to indicate the queue
+		 * should be restarted later. Please see flush_end_io() for
+		 * details.
+		 */
+		if (fq->flush_pending_idx != fq->flush_running_idx &&
+				!queue_flush_queueable(q)) {
+			fq->flush_queue_delayed = 1;
+			return NULL;
+		}
+		if (unlikely(blk_queue_bypass(q)) ||
+		    !q->elevator->type->ops.sq.elevator_dispatch_fn(q, 0))
+			return NULL;
+	}
 }
