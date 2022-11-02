@@ -1,0 +1,12 @@
+kthread简单的生命周期描述
+
+当调用方（内核上，但不是处于kthreadd执行函数体内）发出创建kthread请求时，既调用kthread_create：
+1. 把分配好的kthread_create_info放入到kthread_create_list中
+2. 通过wake_up_process唤醒kthreadd
+3. kthreadd取出一个kthread_create_info
+4. kthreadd clone出新的kthread
+5. 交给kthread函数执行，kthread会简单初始化，然后把自己设为UNINTERRUPTIBLE，接着schedule出去
+    注：这里是clone操作，只是说kthread会走kthread()，kthreadd已经没事干了
+6. 由于kthread端在kthread()切出前设好了done，调用方被唤醒
+7. 调用方设置kthread的名字和调度策略
+8. 等到kthread被调度选中，执行threafn实体
