@@ -1,5 +1,8 @@
 // 文件：/kernel/kthread.c
 
+// kthreadd执行kthreadd()
+// kthread执行kthread()
+// 很有品位的命名
 int kthreadd(void *unused)
 {
 	struct task_struct *tsk = current;
@@ -52,7 +55,7 @@ static void create_kthread(struct kthread_create_info *create)
 #endif
 	/* We want our own signal handler (we take no signals by default). */
 	// 其实kernel_thread也是走的fork
-	// 创建后的kthread不会直接执行
+	// 创建后的kthread不会直接执行（kthread在kthread()中会先schedule()）
 	// 在合适的时机kthread被调度时，会执行kthread(create)，create里面有真正需要执行的threadfn
 	pid = kernel_thread(kthread, create, CLONE_FS | CLONE_FILES | SIGCHLD);
 	if (pid < 0) {
