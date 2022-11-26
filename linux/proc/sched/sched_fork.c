@@ -14,6 +14,8 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 	 * nobody will actually run it, and a signal or other external
 	 * event cannot wake it up and insert it on the runqueue either.
 	 */
+	// 首次创建的进程设为TASK_NEW状态
+	// 确保仍在初始化阶段，不会唤醒，也不会丢到ready queue中
 	p->state = TASK_NEW;
 
 	/*
@@ -42,6 +44,8 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 		p->sched_reset_on_fork = 0;
 	}
 
+	// 根据prio的值，决定是dl、rt还是fair调度
+	// 从这里可看到调度器的优先级
 	if (dl_prio(p->prio)) {
 		put_cpu();
 		return -EAGAIN;
@@ -51,6 +55,7 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 		p->sched_class = &fair_sched_class;
 	}
 
+	// 初始化se
 	init_entity_runnable_average(&p->se);
 
 	/*
@@ -65,8 +70,11 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 	 * We're setting the CPU for the first time, we don't migrate,
 	 * so use __set_task_cpu().
 	 */
+	// 设定CPU，通过get_cpu()来得到cpu变量，由TI管理，用完记得put_cpu()
 	__set_task_cpu(p, cpu);
 	if (p->sched_class->task_fork)
+		// 进入到sched class相关的回调
+		// 目前看的fair调度，对应于task_fork_fair
 		p->sched_class->task_fork(p);
 	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
 
@@ -93,6 +101,7 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
  *
  * __sched_fork() is basic setup used by init_idle() too:
  */
+// 对p执行基本的构造
 static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
 {
 	p->on_rq			= 0;
@@ -174,8 +183,10 @@ static void task_fork_fair(struct task_struct *p)
 	curr = cfs_rq->curr;
 	if (curr) {
 		update_curr(cfs_rq);
+		// 初始化se中的vruntime
 		se->vruntime = curr->vruntime;
 	}
+	// 进一步处理se中的vruntime
 	place_entity(cfs_rq, se, 1);
 
 	if (sysctl_sched_child_runs_first && curr && entity_before(curr, se)) {
