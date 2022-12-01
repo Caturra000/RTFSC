@@ -11,19 +11,24 @@ static void update_curr(struct cfs_rq *cfs_rq)
 	if (unlikely(!curr))
 		return;
 
+	// 求出上次统计的虚拟时间差
 	delta_exec = now - curr->exec_start;
 	if (unlikely((s64)delta_exec <= 0))
 		return;
 
+	// 用于下一次统计虚拟时间差
 	curr->exec_start = now;
 
+	// TODO schedstat特性
 	schedstat_set(curr->statistics.exec_max,
 		      max(delta_exec, curr->statistics.exec_max));
 
 	curr->sum_exec_runtime += delta_exec;
 	schedstat_add(cfs_rq->exec_clock, delta_exec);
 
+	// 按照delta /= w的方式，更新vruntime
 	curr->vruntime += calc_delta_fair(delta_exec, curr);
+	// 更新队列的min vruntime
 	update_min_vruntime(cfs_rq);
 
 	if (entity_is_task(curr)) {
@@ -34,6 +39,7 @@ static void update_curr(struct cfs_rq *cfs_rq)
 		account_group_exec_runtime(curtask, delta_exec);
 	}
 
+	// TODO bandwidth特性
 	account_cfs_rq_runtime(cfs_rq, delta_exec);
 }
 
@@ -115,6 +121,11 @@ static void __update_inv_weight(struct load_weight *lw)
 		lw->inv_weight = WMULT_CONST / w;
 }
 
+// 更新cfs_rq上的min vruntime
+// 从以下可能持有min vruntime的对象获取：
+// - cfs_rq自身的min_vruntime
+// - curr的vruntime
+// - leftmost的vruntime
 static void update_min_vruntime(struct cfs_rq *cfs_rq)
 {
 	struct sched_entity *curr = cfs_rq->curr;
