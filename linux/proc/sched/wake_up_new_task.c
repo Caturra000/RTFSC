@@ -209,6 +209,7 @@ void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
 	const struct sched_class *class;
 
 	if (p->sched_class == rq->curr->sched_class) {
+		// fair实现对应于check_preempt_wakeup
 		rq->curr->sched_class->check_preempt_curr(rq, p, flags);
 	} else {
 		for_each_class(class) {
@@ -234,6 +235,7 @@ void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
 /*
  * Preempt the current task with a newly woken task if needed:
  */
+// 检查是否能抢占，会打上TIF标记
 static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_flags)
 {
 	struct task_struct *curr = rq->curr;
@@ -254,6 +256,7 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	if (unlikely(throttled_hierarchy(cfs_rq_of(pse))))
 		return;
 
+	// TODO NEXT_BUDDY特性
 	if (sched_feat(NEXT_BUDDY) && scale && !(wake_flags & WF_FORK)) {
 		set_next_buddy(pse);
 		next_buddy_marked = 1;
@@ -269,6 +272,7 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	 * prevents us from potentially nominating it as a false LAST_BUDDY
 	 * below.
 	 */
+	// 已经设置TIF就直接跳过整个path了
 	if (test_tsk_need_resched(curr))
 		return;
 
@@ -287,6 +291,7 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	find_matching_se(&se, &pse);
 	update_curr(cfs_rq_of(se));
 	BUG_ON(!pse);
+	// 需要抢占的时候
 	if (wakeup_preempt_entity(se, pse) == 1) {
 		/*
 		 * Bias pick_next to pick the sched entity that is
@@ -300,6 +305,7 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	return;
 
 preempt:
+	// 设置TIF，大概是一个set_bit的过程
 	resched_curr(rq);
 	/*
 	 * Only set the backward buddy when the current task is still
@@ -331,6 +337,12 @@ preempt:
  *  w(c, s3) =  1
  *
  */
+// 通过gran来避免over-scheduling
+// 因此通过vruntime判断抢占会这样：
+// - 如果c比se小，返回-1
+// - 如果c比se大但是差距不超过gran，返回0
+// - 否则返回1
+// 1才允许抢占
 static int
 wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
 {
@@ -348,6 +360,16 @@ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
 
 static unsigned long wakeup_gran(struct sched_entity *se)
 {
+	// sysctl_sched_wakeup_granularity注释如下，不考虑CPU对数则为1ms
+	/*
+	* SCHED_OTHER wake-up granularity.
+	*
+	* This option delays the preemption effects of decoupled workloads
+	* and reduces their over-scheduling. Synchronous workloads will still
+	* have immediate wakeup/sleep latencies.
+	*
+	* (default: 1 msec * (1 + ilog(ncpus)), units: nanoseconds)
+	*/
 	unsigned long gran = sysctl_sched_wakeup_granularity;
 
 	/*
@@ -363,5 +385,6 @@ static unsigned long wakeup_gran(struct sched_entity *se)
 	 * This is especially important for buddies when the leftmost
 	 * task is higher priority than the buddy.
 	 */
+	// 后面还需要calc_delta转换为虚拟时间
 	return calc_delta_fair(gran, se);
 }
