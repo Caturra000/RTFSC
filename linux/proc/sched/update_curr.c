@@ -74,6 +74,13 @@ static inline u64 calc_delta_fair(u64 delta, struct sched_entity *se)
  * Or, weight =< lw.weight (because lw.weight is the runqueue weight), thus
  * weight/lw.weight <= 1, and therefore our shift will also be positive.
  */
+// 搬一份前人做出的解释：
+// __calc_delta() = (delta_exec * weight * lw->inv_weight) >> 32
+//
+//                                   weight                                 2^32
+//                = delta_exec * ----------------    (lw->inv_weight = --------------- )
+//                                 lw->weight                             lw->weight
+// 关键在于inv_weight就是2^32 / weight
 static u64 __calc_delta(u64 delta_exec, unsigned long weight, struct load_weight *lw)
 {
 	u64 fact = scale_load_down(weight);
@@ -108,6 +115,8 @@ static void __update_inv_weight(struct load_weight *lw)
 {
 	unsigned long w;
 
+	// 在一些更新了weight的场合下，inv_weight是同时设为0的
+	// 如果已经算过了（倒数不可能是0），那就直接返回吧
 	if (likely(lw->inv_weight))
 		return;
 
@@ -158,6 +167,8 @@ static void update_min_vruntime(struct cfs_rq *cfs_rq)
 #endif
 }
 
+// min_vruntime和max_vruntime是一些为了处理无符号绕回问题而定制的比较函数
+// 核心思路就是转为signed比较
 static inline u64 min_vruntime(u64 min_vruntime, u64 vruntime)
 {
 	s64 delta = (s64)(vruntime - min_vruntime);
