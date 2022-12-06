@@ -226,17 +226,6 @@ void activate_task(struct rq *rq, struct task_struct *p, int flags)
 
 // 文件：/kernel/sched/core.c
 
-static inline void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
-{
-	if (!(flags & ENQUEUE_NOCLOCK))
-		update_rq_clock(rq);
-
-	if (!(flags & ENQUEUE_RESTORE))
-		sched_info_queued(rq, p);
-
-	p->sched_class->enqueue_task(rq, p, flags);
-}
-
 void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
 {
 	const struct sched_class *class;
