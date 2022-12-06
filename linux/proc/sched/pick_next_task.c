@@ -54,6 +54,9 @@ pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf
 	int new_tasks;
 
 again:
+	// 如果rq此时已经没有可以挑的了
+	// 尝试idle balance（pull tasks from other CPUs）
+	// 操作一下再次走again可能就有可以跑的task了
 	if (!cfs_rq->nr_running)
 		goto idle;
 
@@ -136,14 +139,19 @@ again:
 simple:
 #endif
 
+	// 处理prev后事，比如更新vruntime，处理curr=NULL
+	// fair实现对应于put_prev_task_fair
 	put_prev_task(rq, prev);
 
 	do {
+		// 选择next的核心流程
 		se = pick_next_entity(cfs_rq, NULL);
+		// 选出的se需要进一步处理，重新设置curr
 		set_next_entity(cfs_rq, se);
 		cfs_rq = group_cfs_rq(se);
 	} while (cfs_rq);
 
+	// 选出来的就是p
 	p = task_of(se);
 
 done: __maybe_unused;
@@ -185,9 +193,18 @@ idle:
  * 3) pick the "last" process, for cache locality
  * 4) do not run the "skip" process, if something else is available
  */
+// 一般来说挑选vruntime最小（红黑树最左）的se就行了
+// 但是如注释所言：
+// 1. skip实体不能选
+// 2. last实体对cache更好
+// 3. next实体更有实际价值
+// 理想和现实差得远啊，不仅要避开1，还要衡量2和3值不值
+// - 其中，衡量使用wakeup_preempt_entity比较，
+// - 只要与left相差不大（一个gran内，表示not unfair）即可考虑
 static struct sched_entity *
 pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 {
+	// 很显然，我要挑rbtree中vruntime最小只的那个
 	struct sched_entity *left = __pick_first_entity(cfs_rq);
 	struct sched_entity *se;
 
@@ -196,20 +213,27 @@ pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 	 * still in the tree, provided there was anything in the tree at all.
 	 */
 	if (!left || (curr && entity_before(curr, left)))
+		// 但仍需要和curr比较
 		left = curr;
 
+	// 一般情况就是你了
 	se = left; /* ideally we run the leftmost entity */
 
 	/*
 	 * Avoid running the skip buddy, if running something else can
 	 * be done without getting too unfair.
 	 */
+	// 但如果需要避开skip buddy
 	if (cfs_rq->skip == se) {
 		struct sched_entity *second;
 
+		// 且刚才挑了curr
 		if (se == curr) {
+			// 那就找回left
 			second = __pick_first_entity(cfs_rq);
+		// 且刚才没有算上curr
 		} else {
+			// 那就找left的后继，或者curr
 			second = __pick_next_entity(se);
 			if (!second || (curr && entity_before(curr, second)))
 				second = curr;
@@ -222,6 +246,7 @@ pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 	/*
 	 * Prefer last buddy, try to return the CPU to a preempted task.
 	 */
+	// 但如果需要last buddy
 	if (cfs_rq->last && wakeup_preempt_entity(cfs_rq->last, left) < 1)
 		se = cfs_rq->last;
 
@@ -231,6 +256,10 @@ pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 	if (cfs_rq->next && wakeup_preempt_entity(cfs_rq->next, left) < 1)
 		se = cfs_rq->next;
 
+	// 从代码上来看
+	// 似乎在选取的优先级 next > last
+
+	// 只有命中了se才会清除对应的buddy
 	clear_buddies(cfs_rq, se);
 
 	return se;
@@ -287,10 +316,14 @@ static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
 	if (prev->on_rq) {
 		update_stats_wait_start(cfs_rq, prev);
 		/* Put 'current' back into the tree. */
+		// 似乎deactivate_task（或者说底层dequeue_task）才是真正的把prev拔出cfs_rq
+		// 否则仍然允许在cfs_rq中？
+		// 待确认
 		__enqueue_entity(cfs_rq, prev);
 		/* in !on_rq case, update occurred at dequeue */
 		update_load_avg(cfs_rq, prev, 0);
 	}
+	// curr为空的一个时机
 	cfs_rq->curr = NULL;
 }
 
@@ -310,6 +343,7 @@ set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	}
 
 	update_stats_curr_start(cfs_rq, se);
+	// 重新设置curr（之前是NULL）
 	cfs_rq->curr = se;
 
 	/*
