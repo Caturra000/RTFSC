@@ -1,4 +1,8 @@
 // 文件：/kernel/sched/core.c
+// 如果不考虑附加feature，只论CFS最基础的流程的话，就是：
+// - 调整vruntime
+// - 插入rbtree
+// - 标记on_rq
 static inline void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 {
 	if (!(flags & ENQUEUE_NOCLOCK))
@@ -40,6 +44,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
 
 	for_each_sched_entity(se) {
+		// 这是加入前的代码，如果se已经on_rq，那就不需要处理了
 		if (se->on_rq)
 			break;
 		cfs_rq = cfs_rq_of(se);
@@ -115,6 +120,12 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	 * If we're the current task, we must renormalise before calling
 	 * update_curr().
 	 */
+	// 可能有迁移操作，因此这里加回cpu对应cfs_rq的min_vruntime
+	//
+	// 比如在task_fork_fair时vruntime就在当前的cfs_rq减去min_vruntime
+	// 但是加入的时候可能不同CPU，那就要加对应cfs_rq的min_vruntime
+	//
+	// dequeue操作也是一个道理
 	if (renorm && curr)
 		se->vruntime += cfs_rq->min_vruntime;
 
@@ -142,6 +153,7 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	enqueue_runnable_load_avg(cfs_rq, se);
 	account_entity_enqueue(cfs_rq, se);
 
+	// 针对唤醒的进程，进行一些补偿
 	if (flags & ENQUEUE_WAKEUP)
 		place_entity(cfs_rq, se, 0);
 
@@ -149,7 +161,9 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	update_stats_enqueue(cfs_rq, se, flags);
 	check_spread(cfs_rq, se);
 	if (!curr)
+		// rbtree相关流程
 		__enqueue_entity(cfs_rq, se);
+	// 总算标记on_rq
 	se->on_rq = 1;
 
 	if (cfs_rq->nr_running == 1) {
@@ -161,6 +175,7 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 /*
  * Enqueue an entity into the rb-tree:
  */
+// 大概就是插入到rbtree当中吧
 static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	struct rb_node **link = &cfs_rq->tasks_timeline.rb_root.rb_node;
