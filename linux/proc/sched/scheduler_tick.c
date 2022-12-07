@@ -91,6 +91,10 @@ entity_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr, int queued)
 /*
  * Preempt the current task with a newly woken task if needed:
  */
+// 这里涉及到TIF抢占标记
+// 打上标记的可能有2个
+// 一是本身持续时间超出ideal time
+// 二是跟first entity差距过于明显
 static void
 check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 {
@@ -99,8 +103,11 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 	s64 delta;
 
 	ideal_runtime = sched_slice(cfs_rq, curr);
+	// 求出被调度器选中后持续了多久时间
 	delta_exec = curr->sum_exec_runtime - curr->prev_sum_exec_runtime;
+	// 如果超出理想范围
 	if (delta_exec > ideal_runtime) {
+		// 则打TIF标记，并返回
 		resched_curr(rq_of(cfs_rq));
 		/*
 		 * The current task ran long enough, ensure it doesn't get
@@ -115,9 +122,12 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 	 * narrow margin doesn't have to wait for a full slice.
 	 * This also mitigates buddy induced latencies under load.
 	 */
+	// 如果没超出且小于最小粒度，也直接返回
 	if (delta_exec < sysctl_sched_min_granularity)
 		return;
 
+	// 如果已达到最小粒度，会尝试跟最左那位对比
+	// 如果差距大于一个理想数值，仍会打上标记
 	se = __pick_first_entity(cfs_rq);
 	delta = curr->vruntime - se->vruntime;
 
