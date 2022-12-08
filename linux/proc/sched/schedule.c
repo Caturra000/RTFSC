@@ -1,5 +1,10 @@
 // 文件：/kernel/sched/core.c
 
+// 主动调度的简单流程如下：
+// - 关闭抢占
+// - 挑选next task（见pick_next_task流程）
+// - 执行切换（见switch流程）
+// - 开启抢占
 asmlinkage __visible void __sched schedule(void)
 {
 	struct task_struct *tsk = current;
@@ -87,6 +92,8 @@ static void __sched notrace __schedule(bool preempt)
 	update_rq_clock(rq);
 
 	switch_count = &prev->nivcsw;
+	// 如果是主动调度且处于非TASK_RUNNING，则本次切换贡献在nvcsw
+	// 否则贡献在nivcsw
 	if (!preempt && prev->state) {
 		if (unlikely(signal_pending_state(prev->state, prev))) {
 			prev->state = TASK_RUNNING;
