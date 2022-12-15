@@ -1,0 +1,34 @@
+CC	= gcc
+CFLAGS	= -Wall -O2 -g -D_GNU_SOURCE -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64
+PROGS	= fio
+SCRIPTS = fio_generate_plots
+OBJS = gettime.o fio.o ioengines.o init.o stat.o log.o time.o md5.o crc32.o \
+	filesetup.o eta.o verify.o memory.o io_u.o parse.o
+
+OBJS += engines/fio-engine-cpu.o
+OBJS += engines/fio-engine-mmap.o
+OBJS += engines/fio-engine-posixaio.o
+OBJS += engines/fio-engine-sync.o
+OBJS += engines/fio-engine-null.o
+
+all: depend $(PROGS) $(SCRIPTS)
+
+fio: $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $(OBJS) -lc -lpthread -lm -laio -lrt -ldl
+
+clean:
+	-rm -f *.o .depend cscope.out $(PROGS)
+
+depend:
+	@$(CC) -MM $(ALL_CFLAGS) *.c 1> .depend
+
+cscope:
+	@cscope -b
+
+INSTALL = install
+prefix = /usr/local
+bindir = $(prefix)/bin
+
+install: $(PROGS) $(SCRIPTS)
+	$(INSTALL) -m755 -d $(DESTDIR)$(bindir)
+	$(INSTALL) $(PROGS) $(SCRIPTS) $(DESTDIR)$(bindir)

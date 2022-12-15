@@ -1,0 +1,174 @@
+fio
+---
+
+fio is a tool that will spawn a number of threads or processes doing a
+particular type of io action as specified by the user. fio takes a
+number of global parameters, each inherited by the thread unless
+otherwise parameters given to them overriding that setting is given.
+The typical use of fio is to write a job file matching the io load
+one wants to simulate.
+
+
+Source
+------
+
+fio resides in a git repo, the canonical place is:
+
+git://brick.kernel.dk/data/git/fio.git
+
+Snapshots are frequently generated and they include the git meta data as
+well. You can download them here:
+
+http://brick.kernel.dk/snaps/
+
+Pascal Bleser <guru@unixtech.be> has fio RPMs in his repository, you
+can find them here:
+
+http://linux01.gwdg.de/~pbleser/rpm-navigation.php?cat=System/fio
+
+
+Building
+--------
+
+Just type 'make' and 'make install'. If on FreeBSD, for now you have to
+specify the FreeBSD Makefile with -f, eg:
+
+$ make -f Makefile.Freebsd && make -f Makefile.FreeBSD install
+
+Likewise with OpenSolaris, use the Makefile.solaris to compile there.
+This might change in the future if I opt for an autoconf type setup.
+
+
+Command line
+------------
+
+$ fio
+        --output        Write output to file
+        --timeout       Runtime in seconds
+        --latency-log   Generate per-job latency logs
+        --bandwidth-log Generate per-job bandwidth logs
+        --minimal       Minimal (terse) output
+        --version       Print version info and exit
+
+Any parameters following the options will be assumed to be job files,
+unless they match a job file parameter. You can add as many as you want,
+each job file will be regarded as a separate group and fio will stonewall
+its execution.
+
+
+Job file
+--------
+
+See the HOWTO file for a more detailed description of parameters and what
+they mean. This file contains the terse version.  Only a few options can
+be controlled with command line parameters, generally it's a lot easier to
+just write a simple job file to describe the workload. The job file format
+is in the ini style format, as it's easy to read and write for the user.
+
+The job file parameters are:
+
+	name=x		Use 'x' as the identifier for this job.
+	directory=x	Use 'x' as the top level directory for storing files
+	filename=x	Force the use of 'x' as the filename for all files
+			in this thread. If not given, fio will make up
+			a suitable filename based on the thread and file
+			number.
+	rw=x		'x' may be: read, randread, write, randwrite,
+			rw (read-write mix), randrw (read-write random mix)
+	rwmixcycle=x	Base cycle for switching between read and write
+			in msecs.
+	rwmixread=x	'x' percentage of rw mix ios will be reads. If
+			rwmixwrite is also given, the last of the two will
+			 be used if they don't add up to 100%.
+	rwmixwrite=x	'x' percentage of rw mix ios will be writes. See
+			rwmixread.
+	rand_repeatable=x  The sequence of random io blocks can be repeatable
+			across runs, if 'x' is 1.
+	size=x		Set file size to x bytes (x string can include k/m/g)
+	ioengine=x	'x' may be: aio/libaio/linuxaio for Linux aio,
+			posixaio for POSIX aio, sync for regular read/write io,
+			mmap for mmap'ed io, splice for using splice/vmsplice,
+			or sgio for direct SG_IO io. The latter only works on
+			Linux on SCSI (or SCSI-like devices, such as
+			usb-storage or sata/libata driven) devices. Fio also
+			has a null io engine, which is mainly used for testing
+			fio itself.
+	iodepth=x	For async io, allow 'x' ios in flight
+	overwrite=x	If 'x', layout a write file first.
+	nrfiles=x	Spread io load over 'x' number of files per job,
+			if possible.
+	prio=x		Run io at prio X, 0-7 is the kernel allowed range
+	prioclass=x	Run io at prio class X
+	bs=x		Use 'x' for thread blocksize. May include k/m postfix.
+	bsrange=x-y	Mix thread block sizes randomly between x and y. May
+			also include k/m postfix.
+	direct=x	1 for direct IO, 0 for buffered IO
+	thinktime=x	"Think" x usec after each io
+	rate=x		Throttle rate to x KiB/sec
+	ratemin=x	Quit if rate of x KiB/sec can't be met
+	ratecycle=x	ratemin averaged over x msecs
+	cpumask=x	Only allow job to run on CPUs defined by mask.
+	fsync=x		If writing with buffered IO, fsync after every
+			'x' blocks have been written.
+	end_fsync=x	If 'x', run fsync() after end-of-job.
+	startdelay=x	Start this thread x seconds after startup
+	timeout=x	Terminate x seconds after startup. Can include a
+			normal time suffix if not given in seconds, such as
+			'm' for minutes, 'h' for hours, and 'd' for days.
+	offset=x	Start io at offset x (x string can include k/m/g)
+	invalidate=x	Invalidate page cache for file prior to doing io
+	sync=x		Use sync writes if x and writing buffered IO.
+	mem=x		If x == malloc, use malloc for buffers. If x == shm,
+			use shared memory for buffers. If x == mmap, use
+			anonymous mmap.
+	exitall		When one thread quits, terminate the others
+	bwavgtime=x	Average bandwidth stats over an x msec window.
+	create_serialize=x	If 'x', serialize file creation.
+	create_fsync=x	If 'x', run fsync() after file creation.
+	unlink		If set, unlink files when done.
+	loops=x		Run the job 'x' number of times.
+	verify=x	If 'x' == md5, use md5 for verifies. If 'x' == crc32,
+			use crc32 for verifies. md5 is 'safer', but crc32 is
+			a lot faster. Only makes sense for writing to a file.
+	stonewall	Wait for preceeding jobs to end before running.
+	numjobs=x	Create 'x' similar entries for this job
+	thread		Use pthreads instead of forked jobs
+	zonesize=x
+	zoneskip=y	Zone options must be paired. If given, the job
+			will skip y bytes for every x read/written. This
+			can be used to gauge hard drive speed over the entire
+			platter, without reading everything. Both x/y can
+			include k/m/g suffix.
+	iolog=x		Open and read io pattern from file 'x'. The file must
+			contain one io action per line in the following format:
+			rw, offset, length
+			where with rw=0/1 for read/write, and the offset
+			and length entries being in bytes.
+	write_iolog=x	Write an iolog to file 'x' in the same format as iolog.
+			The iolog options are exclusive, if both given the
+			read iolog will be performed.
+	write_bw_log	Write a bandwidth log.
+	write_lat_log	Write a latency log.
+	lockmem=x	Lock down x amount of memory on the machine, to
+			simulate a machine with less memory available. x can
+			include k/m/g suffix.
+	nice=x		Run job at given nice value.
+	exec_prerun=x	Run 'x' before job io is begun.
+	exec_postrun=x	Run 'x' after job io has finished.
+	ioscheduler=x	Use ioscheduler 'x' for this job.
+	cpuload=x	For a CPU io thread, percentage of CPU time to attempt
+			to burn.
+	cpuchunks=x	Split burn cycles into pieces of x.
+
+
+Author
+------
+
+Fio was written by Jens Axboe <axboe@kernel.dk> to enable flexible testing
+of the Linux IO subsystem and schedulers. He got tired of writing
+specific test applications to simulate a given workload, and found that
+the existing io benchmark/test tools out there weren't flexible enough
+to do what he wanted.
+
+Jens Axboe <axboe@kernel.dk> 20060905
+

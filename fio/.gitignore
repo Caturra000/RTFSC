@@ -1,0 +1,4 @@
+fio
+*.o
+.depend
+cscope.out
