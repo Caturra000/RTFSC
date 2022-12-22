@@ -3,6 +3,7 @@ bool soinfo::prelink_image() {
   if (flags_ & FLAG_PRELINKED) return true;
   /* Extract dynamic section */
   ElfW(Word) dynamic_flags = 0;
+  // 算出soinfo::dynamic，既.dynamic
   phdr_table_get_dynamic_section(phdr, phnum, load_bias, &dynamic, &dynamic_flags);
 
   /* We can't log anything until the linker is relocated */
@@ -47,6 +48,9 @@ bool soinfo::prelink_image() {
   //
   // source: http://www.sco.com/developers/gabi/1998-04-29/ch5.dynamic.html
   uint32_t needed_count = 0;
+  // 解析不同的dynamic entry type
+  // 更多参考：https://docs.oracle.com/cd/E23824_01/html/819-0690/chapter6-42444.html
+  // （虽说是oracle的文件，帮助理解应该也ok？）
   for (ElfW(Dyn)* d = dynamic; d->d_tag != DT_NULL; ++d) {
     DEBUG("d = %p, d[0](tag) = %p d[1](val) = %p",
           d, reinterpret_cast<void*>(d->d_tag), reinterpret_cast<void*>(d->d_un.d_val));

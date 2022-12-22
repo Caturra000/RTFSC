@@ -42,16 +42,20 @@ extern "C" ElfW(Addr) __linker_init(void* raw_args) {
 
   // When the linker is run by itself (rather than as an interpreter for
   // another program), AT_BASE is 0.
+  // 关于auxv可以查看man getauxval，通过读取proc文件系统获得
+  // 关于AT_BASE：The base address of the program interpreter (usually, the dynamic linker).
   ElfW(Addr) linker_addr = getauxval(AT_BASE);
   if (linker_addr == 0) {
     // The AT_PHDR and AT_PHNUM aux values describe this linker instance, so use
     // the phdr to find the linker's base address.
     ElfW(Addr) load_bias;
+    // 通过查找PT_PHDR获取linker_addr
     get_elf_base_from_phdr(
       reinterpret_cast<ElfW(Phdr)*>(getauxval(AT_PHDR)), getauxval(AT_PHNUM),
       &linker_addr, &load_bias);
   }
 
+  // 算出ehdr和phdr
   ElfW(Ehdr)* elf_hdr = reinterpret_cast<ElfW(Ehdr)*>(linker_addr);
   ElfW(Phdr)* phdr = reinterpret_cast<ElfW(Phdr)*>(linker_addr + elf_hdr->e_phoff);
 
@@ -69,6 +73,8 @@ extern "C" ElfW(Addr) __linker_init(void* raw_args) {
   tmp_linker_so.set_linker_flag();
 
   // Prelink the linker so we can access linker globals.
+  // 目前无法访问外部变量或者外部函数
+  // 需要先完成自举过程
   if (!tmp_linker_so.prelink_image()) __linker_cannot_link(args.argv[0]);
   if (!tmp_linker_so.link_image(SymbolLookupList(&tmp_linker_so), &tmp_linker_so, nullptr, nullptr)) __linker_cannot_link(args.argv[0]);
 
