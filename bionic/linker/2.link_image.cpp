@@ -135,6 +135,8 @@ bool soinfo::relocate(const SymbolLookupList& lookup_list) {
     }
   }
 
+// android在LP64下使用的是RELA
+// 参考：https://cs.android.com/android/platform/superproject/+/android-13.0.0_r18:bionic/linker/linker_common_types.h;l=38
 #if defined(USE_RELA)
   if (rela_ != nullptr) {
     DEBUG("[ relocating %s rela ]", get_realpath());
@@ -538,6 +540,7 @@ static bool process_relocation_impl(Relocator& relocator, const rel_t& reloc) {
         const Elf32_Addr result = sym_addr + reloc.r_addend;
         trace_reloc("RELO R_X86_64_32 %16p <- 0x%08x %s",
                     rel_target, result, sym_name);
+        // 重定位操作
         *static_cast<Elf32_Addr*>(rel_target) = result;
       }
       break;
@@ -550,6 +553,7 @@ static bool process_relocation_impl(Relocator& relocator, const rel_t& reloc) {
         trace_reloc("RELO R_X86_64_PC32 %16p <- 0x%08x (%16p - %16p) %s",
                     rel_target, result, reinterpret_cast<void*>(target),
                     reinterpret_cast<void*>(base), sym_name);
+        // 类似R_X86_64_32
         *static_cast<Elf32_Addr*>(rel_target) = result;
       }
       break;
