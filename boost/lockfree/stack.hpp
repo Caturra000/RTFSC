@@ -38,6 +38,12 @@ typedef parameter::parameters<boost::parameter::optional<tag::allocator>,
 
 }
 
+// 这里提到：
+// - 内存的回收是仅当stack销毁时才执行，看样子可以简化lockfree实现
+// - fixed_sized实现会使得内部结点直接存储于一个数组上，通过index访问（限制2^16-2）
+//   这对于缺少double-width compare-and-exchange指令的平台来说是一个实现lock-free的最佳方式
+// - 对于元素的要求是需要支持copy ctor
+// - TODO allocator
 /** The stack class provides a multi-writer/multi-reader stack, pushing and popping is lock-free,
  *  construction/destruction has to be synchronized. It uses a freelist for memory management,
  *  freed nodes are pushed to the freelist and not returned to the OS before the stack is destroyed.
@@ -64,6 +70,7 @@ typedef parameter::parameters<boost::parameter::optional<tag::allocator>,
 #ifdef BOOST_NO_CXX11_VARIADIC_TEMPLATES
 template <typename T, class A0, class A1, class A2>
 #else
+// Options会放到bound_args里，然后extract
 template <typename T, typename ...Options>
 #endif
 class stack
@@ -90,12 +97,17 @@ private:
             v(val)
         {}
 
+        // 如果是node_based，那么handle_type为node*
+        // 否则是tagged_index::index_t
+        // （tagged_index在freelist实现中定义）
         typedef typename detail::select_tagged_handle<node, node_based>::handle_type handle_t;
         handle_t next;
         const T v;
     };
 
+    // TODO 没看，当作是std::allocator吧
     typedef typename detail::extract_allocator<bound_args, node>::type node_allocator;
+    // 决定freelist是fixed还是其它实现
     typedef typename detail::select_freelist<node, node_allocator, compile_time_sized, fixed_sized, capacity>::type pool_t;
     typedef typename pool_t::tagged_node_handle tagged_node_handle;
 
@@ -210,6 +222,7 @@ public:
     ~stack(void)
     {
         T dummy;
+        // 回收实现
         while(unsynchronized_pop(dummy))
         {}
     }
@@ -221,6 +234,7 @@ private:
         tos.store(tagged_node_handle(pool.null_handle(), 0));
     }
 
+    // 用于do_push
     void link_nodes_atomic(node * new_top_node, node * end_node)
     {
         tagged_node_handle old_tos = tos.load(detail::memory_order_relaxed);
@@ -290,8 +304,10 @@ public:
      *                    from the OS. This may not be lock-free.
      * \throws if memory allocator throws
      * */
+    // 见注释，如果用了动态内存分配策略，该操作可能不是lock-free
     bool push(T const & v)
     {
+        // 模板参数中false指的是non-bounded，内存不够了会尝试从OS获取，只要能申请到就不失败
         return do_push<false>(v);
     }
 
@@ -302,6 +318,7 @@ public:
      *
      * \note Thread-safe and non-blocking. If internal memory pool is exhausted, the push operation will fail
      * */
+    // bounded push指的是如果内存不够了，直接返回失败
     bool bounded_push(T const & v)
     {
         return do_push<true>(v);
@@ -316,10 +333,12 @@ private:
         if (newnode == 0)
             return false;
 
+        // 无锁push的核心实现
         link_nodes_atomic(newnode, newnode);
         return true;
     }
 
+    // push多个元素，boost在接口上选择用迭代器
     template <bool Bounded, typename ConstIterator>
     ConstIterator do_push(ConstIterator begin, ConstIterator end)
     {
