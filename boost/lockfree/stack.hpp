@@ -109,6 +109,7 @@ private:
     typedef typename detail::extract_allocator<bound_args, node>::type node_allocator;
     // 决定freelist是fixed还是其它实现
     typedef typename detail::select_freelist<node, node_allocator, compile_time_sized, fixed_sized, capacity>::type pool_t;
+    // 使用tagged pointer封装过的node handle，见freelist.hpp文件描述，在这里简单理解为node*
     typedef typename pool_t::tagged_node_handle tagged_node_handle;
 
     // check compile-time capacity
@@ -153,6 +154,7 @@ public:
         pool(node_allocator(), capacity)
     {
         BOOST_ASSERT(has_capacity);
+        // 使用全序更新
         initialize();
     }
 
@@ -454,6 +456,8 @@ public:
     bool pop(U & ret)
     {
         BOOST_STATIC_ASSERT((boost::is_convertible<T, U>::value));
+        // 为什么需要额外一个consumer变量？
+        // 原来consume_one需要的是一个functor，那就需要consumer封装一下
         detail::consume_via_copy<U> consumer(ret);
 
         return consume_one(consumer);
@@ -519,6 +523,7 @@ public:
             if (!old_tos_pointer)
                 return false;
 
+            // 使用get_next_tag得到新的tag
             tagged_node_handle new_tos(old_tos_pointer->next, old_tos.get_next_tag());
 
             if (tos.compare_exchange_weak(old_tos, new_tos)) {
