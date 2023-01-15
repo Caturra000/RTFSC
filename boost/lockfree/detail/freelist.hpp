@@ -35,6 +35,21 @@ namespace boost    {
 namespace lockfree {
 namespace detail   {
 
+// freelist是lockfree类存放元素用的容器
+// 不管是stack还是queue都是直接用的typedef typename detail::select_freelist<...>::type pool_t
+// 这个select_freelist萃取如果满足IsCompileTimeSized || IsFixedSize
+// 则选择使用fixed_size_freelist<T, fixed_sized_storage_type>
+// 否则为freelist_stack<T, Alloc>
+//
+// 先看个freelist_stack吧
+
+
+// 其实也没啥实现技巧
+// 简单点看成一个std::atomic<T*>的容器即可
+// <del>consturct时只需要allocator处理</del>，而destruct时T* dtor再放入容器
+// 实现是否lockfree要看std::atomic是否有奇怪的特化
+// 需要注意的是接口要提供线程安全与非线程安全2个版本
+// 其核心思路一是使用tagged_ptr避免ABA，二是使用compare_exchange_weak
 template <typename T,
           typename Alloc = std::allocator<T>
          >
@@ -43,6 +58,15 @@ class freelist_stack:
 {
     struct freelist_node
     {
+        // 关于tagged_ptr类：
+        // 似乎是一个compressed pointer
+        // 既只用低48位作为地址，其余高位用于其它标记的技巧（只考虑x86_64下）
+        // 接口上pack存放，extract获取，都是一些按位运算
+        // （实现上用union分为4个uint16，这样拿tag只需要访问index=3就好了，好机智哦）
+        //
+        // 至于为什么需要这个，就是用于避免ABA问题
+        // we can use the remaining 16bit for the ABA prevention tag
+        // 文档：https://www.boost.org/doc/libs/1_81_0/doc/html/lockfree/rationale.html#lockfree.rationale.aba_prevention
         tagged_ptr<freelist_node> next;
     };
 
@@ -59,9 +83,15 @@ public:
     {
         for (std::size_t i = 0; i != n; ++i) {
             T * node = Alloc::allocate(1);
+// 不知道这个macro什么意思
+// allocate按标准返回的是uninitialized storage
+// 为啥需要调用dtor？
 #ifdef BOOST_LOCKFREE_FREELIST_INIT_RUNS_DTOR
             destruct<false>(node);
+// 看这个吧
 #else
+            // 构造时用deallocate，估计时回收操作放入到freelist中吧
+            // 且不要求threadsafe（模板参数false）
             deallocate<false>(node);
 #endif
         }
@@ -225,6 +255,7 @@ protected:
     }
 
 private:
+    // threadsafe实现的deallocate，使用CAS完成pool更新
     void deallocate_impl (T * n)
     {
         void * node = n;
@@ -240,15 +271,19 @@ private:
         }
     }
 
+    // unsafe实现的deallocate，因为pool_类型是atomic，所以没得选只能relaxed作为plain load / store
     void deallocate_impl_unsafe (T * n)
     {
         void * node = n;
         tagged_node_ptr old_pool = pool_.load(memory_order_relaxed);
+        // 比较跳跃，接口传递的n就是一个分配好的指针，先后转void*再转freelist_node*是为什么？
+        // 总之在freelist_stack实现中，所谓的pool_不过是一个指向顶端的atomic pointer
         freelist_node * new_pool_ptr = reinterpret_cast<freelist_node*>(node);
 
         tagged_node_ptr new_pool (new_pool_ptr, old_pool.get_tag());
         new_pool->next.set_ptr(old_pool.get_ptr());
 
+        // 不考虑线程安全，但是因为是atomic总得选一个memory order
         pool_.store(new_pool, memory_order_relaxed);
     }
 
@@ -618,6 +653,10 @@ template <typename T,
           >
 struct select_freelist
 {
+    // 如果容器选用fixed_size_freelist时需要用到的类型
+    // 如果满足IsCompileTimeSized
+    // 则选用compiletime_sized_freelist_storage<T, Capacity>
+    // 否则为runtime_sized_freelist_storage<T, Alloc>
     typedef typename mpl::if_c<IsCompileTimeSized,
                                compiletime_sized_freelist_storage<T, Capacity>,
                                runtime_sized_freelist_storage<T, Alloc>
