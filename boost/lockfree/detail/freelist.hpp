@@ -277,7 +277,18 @@ private:
         void * node = n;
         tagged_node_ptr old_pool = pool_.load(memory_order_relaxed);
         // 比较跳跃，接口传递的n就是一个分配好的指针，先后转void*再转freelist_node*是为什么？
+        // 是间接的使用launder吗？
+        //
         // 总之在freelist_stack实现中，所谓的pool_不过是一个指向顶端的atomic pointer
+        //
+        // update.
+        // 这段代码可能有问题
+        // 如果一个sizeof(T)小于一个指针的大小（x86_64严格点是48位）
+        // 以及使用的allocator是没有额外添加padding
+        // 且所有分配对象共用一段连续空间的话
+        // next会被重叠的写入破坏从而指向奇怪的地址
+        // 写了个fixed_size_allocator复现了问题，然而std::allocator运行是正确的orz
+        // （然而已经10年没改动过，是不是我写的allocator太菜了。。。）
         freelist_node * new_pool_ptr = reinterpret_cast<freelist_node*>(node);
 
         tagged_node_ptr new_pool (new_pool_ptr, old_pool.get_tag());
