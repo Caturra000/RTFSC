@@ -1,9 +1,15 @@
 // 文件：bionic/linker/arch/x86_64/begin.S
+// Android (Dynamic) Linker在可执行文件载入时根据ELF的INTERP先启动自身
+// 经过系统调用后，控制流由kernel传入到`_start`函数
+// 在跳转后，由%rsp指向的栈有以下信息（大概）
+// argc, argv[0...n), null, envp[0...term), null, auxv[0...term]
 ENTRY(_start)
   // Force unwinds to end in this function.
   .cfi_undefined %rip
 
   mov %rsp, %rdi
+  // 跳转到__linker_init，
+  // rdi参数既栈顶，因此从传参raw_args能得知argc, argv, envp和auxv
   call __linker_init
 
   /* linker init returns (%rax) the _entry address in the main image */
@@ -24,19 +30,21 @@ END(_start)
  * relocations, any attempt to reference an extern variable, extern
  * function, or other GOT reference will generate a segfault.
  */
-/*
- * This is the entry point for the linker, called from begin.S. This
- * method is responsible for fixing the linker's own relocations, and
- * then calling __linker_init_post_relocation().
- *
- * Because this method is called before the linker has fixed it's own
- * relocations, any attempt to reference an extern variable, extern
- * function, or other GOT reference will generate a segfault.
- */
+// 链接器本身（也作为一个.so）需要外部链接（extern）的部分在未自举前无法使用
+// 所以在源码中多用static来规避问题，并且不引入依赖库
+//
+// 在实现上，为了使用非静态函数，linker将这部分源码从.o生成.a，
+// 然后在调用lld使用-shared生成.so时，使用-Bstatic选项进行静态链接
+// 但是非静态的（全局）变量仍然需要GOT，目前无法使用
 extern "C" ElfW(Addr) __linker_init(void* raw_args) {
   // Initialize TLS early so system calls and errno work.
+  // 比如errno是threadlocal，所以要先处理（一部分）TLS问题
+  //
+  // 这里`args`用于解析%rdi传递得到的raw_args
   KernelArgumentBlock args(raw_args);
   bionic_tcb temp_tcb __attribute__((uninitialized));
+  // 由于memset有ifunc限制暂时无法使用，这里使用一个相对低效的实现
+  // TODO ifunc https://jasoncc.github.io/gnu_gcc_glibc/gnu-ifunc.html
   linker_memclr(&temp_tcb, sizeof(temp_tcb));
   __libc_init_main_thread_early(args, &temp_tcb);
 
@@ -62,6 +70,7 @@ extern "C" ElfW(Addr) __linker_init(void* raw_args) {
   // string.h functions must not be used prior to calling the linker's ifunc resolvers.
   call_ifunc_resolvers();
 
+  // TODO soinfo会用于dlopen内部实现
   soinfo tmp_linker_so(nullptr, nullptr, nullptr, 0, 0);
 
   tmp_linker_so.base = linker_addr;
@@ -73,11 +82,13 @@ extern "C" ElfW(Addr) __linker_init(void* raw_args) {
   tmp_linker_so.set_linker_flag();
 
   // Prelink the linker so we can access linker globals.
-  // 目前无法访问外部变量或者外部函数
+  // 目前无法访问外部变量
   // 需要先完成自举过程
   if (!tmp_linker_so.prelink_image()) __linker_cannot_link(args.argv[0]);
+  // TODO SymbolLookupList类型
   if (!tmp_linker_so.link_image(SymbolLookupList(&tmp_linker_so), &tmp_linker_so, nullptr, nullptr)) __linker_cannot_link(args.argv[0]);
 
+  // 在__linker_init_post_relocation前已完成linker自举
   return __linker_init_post_relocation(args, tmp_linker_so);
 }
 
