@@ -85,6 +85,7 @@ bool soinfo::link_image(const SymbolLookupList& lookup_list, soinfo* local_group
 
   ++g_module_load_counter;
   notify_gdb_of_load(this);
+  // 标记完成
   set_image_linked();
   return true;
 }
@@ -99,6 +100,7 @@ bool soinfo::relocate(const SymbolLookupList& lookup_list) {
     return false;
   }
 
+  // 参考：https://cs.android.com/android/platform/superproject/+/android-13.0.0_r18:bionic/linker/linker_relocate.cpp;l=59
   Relocator relocator(version_tracker, lookup_list);
   relocator.si = this;
   relocator.si_strtab = strtab_;
@@ -107,6 +109,8 @@ bool soinfo::relocate(const SymbolLookupList& lookup_list) {
   relocator.tlsdesc_args = &tlsdesc_args_;
   relocator.tls_tp_base = __libc_shared_globals()->static_tls_layout.offset_thread_pointer();
 
+  // 如果存在DT_ANDROID_RELA
+  // 参考：https://reviews.llvm.org/D39152
   if (android_relocs_ != nullptr) {
     // check signature
     if (android_relocs_size_ > 3 &&
@@ -128,6 +132,7 @@ bool soinfo::relocate(const SymbolLookupList& lookup_list) {
     }
   }
 
+  // DT_RELR或者DT_ANDROID_RELR
   if (relr_ != nullptr) {
     DEBUG("[ relocating %s relr ]", get_realpath());
     if (!relocate_relr()) {
@@ -152,12 +157,14 @@ bool soinfo::relocate(const SymbolLookupList& lookup_list) {
     }
   }
 #else
+  // 对应DT_REL
   if (rel_ != nullptr) {
     DEBUG("[ relocating %s rel ]", get_realpath());
     if (!plain_relocate<RelocMode::Typical>(relocator, rel_, rel_count_)) {
       return false;
     }
   }
+  // 对应DT_JMPREL
   if (plt_rel_ != nullptr) {
     DEBUG("[ relocating %s plt rel ]", get_realpath());
     if (!plain_relocate<RelocMode::JumpTable>(relocator, plt_rel_, plt_rel_count_)) {
@@ -180,9 +187,11 @@ bool soinfo::relocate(const SymbolLookupList& lookup_list) {
   return true;
 }
 
+// packed_relocate...
 
 template <RelocMode OptMode, typename ...Args>
 static bool packed_relocate(Relocator& relocator, Args ...args) {
+  // 如果开启DEBUG，那么使用slow relocate loop
   return needs_slow_relocate_loop(relocator) ?
       packed_relocate_impl<RelocMode::General>(relocator, args...) :
       packed_relocate_impl<OptMode>(relocator, args...);
@@ -194,6 +203,26 @@ static bool packed_relocate_impl(Relocator& relocator, sleb128_decoder decoder) 
   return for_all_packed_relocs(decoder, [&](const rel_t& reloc) {
     return process_relocation<Mode>(relocator, reloc);
   });
+}
+
+// plain_relocate...
+
+template <RelocMode OptMode, typename ...Args>
+static bool plain_relocate(Relocator& relocator, Args ...args) {
+  return needs_slow_relocate_loop(relocator) ?
+      plain_relocate_impl<RelocMode::General>(relocator, args...) :
+      plain_relocate_impl<OptMode>(relocator, args...);
+}
+
+template <RelocMode Mode>
+__attribute__((noinline))
+static bool plain_relocate_impl(Relocator& relocator, rel_t* rels, size_t rel_count) {
+  for (size_t i = 0; i < rel_count; ++i) {
+    if (!process_relocation<Mode>(relocator, rels[i])) {
+      return false;
+    }
+  }
+  return true;
 }
 
 template <RelocMode Mode>
@@ -209,6 +238,7 @@ static bool process_relocation_general(Relocator& relocator, const rel_t& reloc)
   return process_relocation_impl<RelocMode::General>(relocator, reloc);
 }
 
+// 可以先跟踪Mode == RelocMode::Typical
 template <RelocMode Mode>
 __attribute__((always_inline))
 static bool process_relocation_impl(Relocator& relocator, const rel_t& reloc) {
@@ -334,6 +364,7 @@ static bool process_relocation_impl(Relocator& relocator, const rel_t& reloc) {
     if (r_sym == 0) {
       // Do nothing.
     } else {
+      // 找出sym（过程麻烦略了），relocator会对找到的结果进行cache处理
       if (!lookup_symbol<IsGeneral>(relocator, r_sym, sym_name, &found_in, &sym)) return false;
       if (sym != nullptr) {
         const bool should_protect_segments = handle_text_relocs &&
@@ -371,15 +402,19 @@ static bool process_relocation_impl(Relocator& relocator, const rel_t& reloc) {
     }
   }
 
+  // 跟踪这里
   if constexpr (IsGeneral || Mode == RelocMode::Typical) {
     // Almost all dynamic relocations are of one of these types, and most will be
     // R_GENERIC_ABSOLUTE. The platform typically uses RELR instead, but R_GENERIC_RELATIVE is
     // common in non-platform binaries.
+    // 一般来说r_type都是这个，谷歌在这里做了个跨平台类型R_GENERIC_ABSOLUTE
+    // 见：https://cs.android.com/android/platform/superproject/+/master:bionic/linker/linker_relocs.h;l=93
     if (r_type == R_GENERIC_ABSOLUTE) {
       count_relocation_if<IsGeneral>(kRelocAbsolute);
       const ElfW(Addr) result = sym_addr + get_addend_rel();
       trace_reloc("RELO ABSOLUTE %16p <- %16p %s",
                   rel_target, reinterpret_cast<void*>(result), sym_name);
+      // 实际上的重定位操作
       *static_cast<ElfW(Addr)*>(rel_target) = result;
       return true;
     } else if (r_type == R_GENERIC_GLOB_DAT) {
@@ -404,6 +439,7 @@ static bool process_relocation_impl(Relocator& relocator, const rel_t& reloc) {
     }
   }
 
+  // 见下方注释，在这之前基本都处理好了
   if constexpr (!IsGeneral) {
     // Almost all relocations are handled above. Handle the remaining relocations below, in a
     // separate function call. The symbol lookup will be repeated, but the result should be served

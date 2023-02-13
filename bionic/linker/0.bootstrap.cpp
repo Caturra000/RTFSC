@@ -71,6 +71,7 @@ extern "C" ElfW(Addr) __linker_init(void* raw_args) {
   call_ifunc_resolvers();
 
   // TODO soinfo会用于dlopen内部实现
+  // 目前soinfo没法完成堆管理，先用栈暂存，自举完成后再搬过去
   soinfo tmp_linker_so(nullptr, nullptr, nullptr, 0, 0);
 
   tmp_linker_so.base = linker_addr;
@@ -86,6 +87,7 @@ extern "C" ElfW(Addr) __linker_init(void* raw_args) {
   // 需要先完成自举过程
   if (!tmp_linker_so.prelink_image()) __linker_cannot_link(args.argv[0]);
   // TODO SymbolLookupList类型
+  // 参考：https://cs.android.com/android/platform/superproject/+/android-13.0.0_r18:bionic/linker/linker_soinfo.h;l=97
   if (!tmp_linker_so.link_image(SymbolLookupList(&tmp_linker_so), &tmp_linker_so, nullptr, nullptr)) __linker_cannot_link(args.argv[0]);
 
   // 在__linker_init_post_relocation前已完成linker自举

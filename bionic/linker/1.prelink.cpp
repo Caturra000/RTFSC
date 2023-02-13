@@ -1,4 +1,7 @@
 // 文件：bionic/linker/linker.cpp
+// 简单点说，prelink阶段做的事情就是：
+// 1. 找到.dynamic的位置
+// 2. 从中解析不同的dynamic entry type，填到soinfo给下一阶段用
 bool soinfo::prelink_image() {
   if (flags_ & FLAG_PRELINKED) return true;
   /* Extract dynamic section */
@@ -51,6 +54,7 @@ bool soinfo::prelink_image() {
   // 解析不同的dynamic entry type
   // 更多参考：https://docs.oracle.com/cd/E23824_01/html/819-0690/chapter6-42444.html
   // （虽说是oracle的文件，帮助理解应该也ok？）
+  // 注：当linker需要重定位时，不允许存在DT_NEEDED
   for (ElfW(Dyn)* d = dynamic; d->d_tag != DT_NULL; ++d) {
     DEBUG("d = %p, d[0](tag) = %p d[1](val) = %p",
           d, reinterpret_cast<void*>(d->d_tag), reinterpret_cast<void*>(d->d_un.d_val));
